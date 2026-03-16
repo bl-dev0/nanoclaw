@@ -63,6 +63,26 @@ systemctl --user restart nanoclaw
 
 Never modify `src/container-runner.ts`, `container/agent-runner/src/index.ts`, or other core files directly to add integrations. Always create or use a skill in `.claude/skills/`. The `.mcp.json` approach does not work for container-based integrations — MCP servers must be bind-mounted via `container-runner.ts` and registered in `container/agent-runner/src/index.ts`, which is what the skills document.
 
+## VPS Operational Notes
+
+**Docker image rebuild required:** Every time `container/agent-runner/src/index.ts` is modified, rebuild the image:
+```bash
+docker build -t nanoclaw-agent:latest -f ~/nanoclaw/container/Dockerfile ~/nanoclaw/container/ && systemctl --user restart nanoclaw
+```
+
+**Telegram Group Privacy:** Bots don't read all group messages by default. Fix: BotFather → select bot → Bot Settings → Group Privacy → Turn off. Then remove and re-add the bot to existing groups for the change to take effect.
+
+**GitHub tokens for organization repos:** Fine-grained tokens are org-specific. For repos under an org (e.g. `Beequa-Labs/spend-wise`), create the token with **Resource owner** set to the org, not your personal account.
+
+**MCP integrations don't use `.mcp.json`:** Containers cannot read the host's `.mcp.json`. Use `container-runner.ts` + `container/agent-runner/src/index.ts` via skills instead (see `## Adding Integrations`).
+
+**After any new MCP integration:** Clear the agent-runner-src cache so the updated `index.ts` is picked up:
+```bash
+rm -rf ~/nanoclaw/data/sessions/<group>/agent-runner-src
+# Or clear all groups:
+rm -rf ~/nanoclaw/data/sessions/*/agent-runner-src
+```
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
