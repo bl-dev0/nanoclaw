@@ -407,7 +407,9 @@ async function runQuery(
         'TeamCreate', 'TeamDelete', 'SendMessage',
         'TodoWrite', 'ToolSearch', 'Skill',
         'NotebookEdit',
-        'mcp__nanoclaw__*'
+        'mcp__nanoclaw__*',
+        'mcp__google-calendar__*',
+        'mcp__github__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -423,6 +425,23 @@ async function runQuery(
             NANOCLAW_IS_MAIN: containerInput.isMain ? '1' : '0',
           },
         },
+        ...(process.env.GOOGLE_OAUTH_CREDENTIALS ? {
+          'google-calendar': {
+            command: 'google-calendar-mcp',
+            env: {
+              GOOGLE_OAUTH_CREDENTIALS: process.env.GOOGLE_OAUTH_CREDENTIALS,
+            },
+          },
+        } : {}),
+        ...(process.env.GITHUB_TOKEN ? {
+          github: {
+            command: 'node',
+            args: ['/usr/local/lib/mcp-server-github.js'],
+            env: {
+              GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN,
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],

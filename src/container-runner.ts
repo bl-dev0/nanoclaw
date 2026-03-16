@@ -4,6 +4,7 @@
  */
 import { ChildProcess, exec, spawn } from 'child_process';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 
 import {
@@ -209,6 +210,61 @@ function buildVolumeMounts(
     mounts.push(...validatedMounts);
   }
 
+  // Google Calendar MCP: mount credentials, token store, and binary if configured
+  const gcpCreds = process.env.GOOGLE_OAUTH_CREDENTIALS;
+  if (gcpCreds && fs.existsSync(gcpCreds)) {
+    mounts.push({
+      hostPath: gcpCreds,
+      containerPath: '/home/node/gcp-oauth.keys.json',
+      readonly: true,
+    });
+    const gcpTokensDir = path.join(
+      os.homedir(),
+      '.config',
+      'google-calendar-mcp',
+    );
+    fs.mkdirSync(gcpTokensDir, { recursive: true });
+    mounts.push({
+      hostPath: gcpTokensDir,
+      containerPath: '/home/node/.config/google-calendar-mcp',
+      readonly: false,
+    });
+    const gcpBinary = path.join(
+      os.homedir(),
+      '.npm-global',
+      'bin',
+      'google-calendar-mcp',
+    );
+    if (fs.existsSync(gcpBinary)) {
+      mounts.push({
+        hostPath: gcpBinary,
+        containerPath: '/usr/local/bin/google-calendar-mcp',
+        readonly: true,
+      });
+    }
+  }
+
+  // GitHub MCP: mount the server binary if GITHUB_TOKEN is set
+  if (process.env.GITHUB_TOKEN) {
+    const githubBinary = path.join(
+      os.homedir(),
+      '.npm-global',
+      'lib',
+      'node_modules',
+      '@modelcontextprotocol',
+      'server-github',
+      'dist',
+      'index.js',
+    );
+    if (fs.existsSync(githubBinary)) {
+      mounts.push({
+        hostPath: githubBinary,
+        containerPath: '/usr/local/lib/mcp-server-github.js',
+        readonly: true,
+      });
+    }
+  }
+
   return mounts;
 }
 
@@ -220,6 +276,16 @@ function buildContainerArgs(
 
   // Pass host timezone so container's local time matches the user's
   args.push('-e', `TZ=${TIMEZONE}`);
+
+  // Expose Google Calendar MCP credentials path inside the container
+  if (process.env.GOOGLE_OAUTH_CREDENTIALS) {
+    args.push('-e', 'GOOGLE_OAUTH_CREDENTIALS=/home/node/gcp-oauth.keys.json');
+  }
+
+  // Pass GitHub token for GitHub MCP server
+  if (process.env.GITHUB_TOKEN) {
+    args.push('-e', `GITHUB_TOKEN=${process.env.GITHUB_TOKEN}`);
+  }
 
   // Route API traffic through the credential proxy (containers never see real secrets)
   args.push(
