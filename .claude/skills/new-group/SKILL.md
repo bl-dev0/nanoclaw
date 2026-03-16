@@ -1,0 +1,145 @@
+---
+name: new-group
+description: Register a new Telegram group with NanoClaw. Creates the group folder, CLAUDE.md, and SQLite registration.
+---
+
+# New Group
+
+This skill registers a new Telegram group with NanoClaw, creates its isolated folder and CLAUDE.md, and provides reminders for any follow-up steps.
+
+## Phase 1: Gather Information
+
+### Ask for group details
+
+AskUserQuestion: What is the name and purpose of this group?
+
+Collect:
+- **Display name** — e.g. "SpendWise Dev", "Family", "Work"
+- **Purpose / context** — what will this group be used for? What should the assistant know about it?
+
+AskUserQuestion: Should this be a main group (no trigger required) or a standard group (trigger word required)?
+- **Standard group** — responds only when @Tom is mentioned (Recommended for most groups)
+- **Main group** — responds to every message (only one main group should exist)
+
+### Get the Telegram chat ID
+
+If the user doesn't have the chat ID yet, tell them:
+
+> To get the Telegram chat ID:
+>
+> 1. Create a new Telegram group (or use an existing one)
+> 2. Add your bot to the group
+> 3. Send `/chatid` in the group — the bot will reply with the chat ID
+>
+> The chat ID for groups is a negative number starting with `-100` (e.g. `-1001234567890`).
+
+Wait for the user to provide the chat ID.
+
+### Confirm folder name
+
+Derive a snake_case folder name from the group name (e.g. "SpendWise Dev" → `spendwise_dev`, "Family Chat" → `family_chat`). Confirm with the user before proceeding.
+
+## Phase 2: Register the Group
+
+### Register in SQLite
+
+For a **standard group**:
+
+```bash
+cd ~/nanoclaw
+npx tsx setup/index.ts --step register -- \
+  --jid "tg:<chat-id>" \
+  --name "<group-name>" \
+  --folder "<folder-name>" \
+  --trigger "@Tom" \
+  --channel telegram
+```
+
+For a **main group** (no trigger required):
+
+```bash
+cd ~/nanoclaw
+npx tsx setup/index.ts --step register -- \
+  --jid "tg:<chat-id>" \
+  --name "<group-name>" \
+  --folder "<folder-name>" \
+  --trigger "@Tom" \
+  --channel telegram \
+  --no-trigger-required \
+  --is-main
+```
+
+Confirm the registration succeeded with no errors.
+
+## Phase 3: Create Group CLAUDE.md
+
+Create `groups/<folder-name>/CLAUDE.md` tailored to the group's purpose. At minimum include:
+
+- The assistant's name (Tom)
+- The group's purpose and context
+- Any specific behavior, tone, or constraints relevant to this group
+- If the group has access to specific tools (GitHub, Calendar, etc.), document them
+
+Example structure:
+
+```markdown
+# <Group Name>
+
+Eres Tom, [role description].
+
+## Contexto
+
+[Purpose and relevant background for this group]
+
+## [Additional sections as needed]
+```
+
+Use the information the user provided in Phase 1 to write a useful, specific CLAUDE.md — not a generic placeholder.
+
+## Phase 4: Reminders
+
+### Group Privacy (for group chats)
+
+Tell the user:
+
+> **Important:** By default, Telegram bots only see @mentions and commands in groups — not all messages. Since this is a standard group using @Tom as trigger, this may already be fine. But if you want the bot to see all messages:
+>
+> 1. Open Telegram and search for `@BotFather`
+> 2. Send `/mybots` and select your bot
+> 3. Go to **Bot Settings** > **Group Privacy** > **Turn off**
+> 4. **Remove and re-add the bot to the group** — the change only takes effect for new group memberships
+
+### Docker rebuild (if new MCP integrations were added)
+
+If this new group requires MCP tools that were just added (new entries in `container/agent-runner/src/index.ts`), run `/rebuild` to rebuild the Docker image and clear the cache.
+
+If no changes were made to the container configuration, no rebuild is needed — the new group's agent-runner-src directory will be created fresh on its first container run.
+
+## Troubleshooting
+
+### "Group not found" or bot doesn't respond
+
+1. Confirm the bot is a member of the group
+2. Check the JID is correct: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE folder = '<folder>'"`
+3. Verify the trigger: for standard groups, the message must contain `@Tom`
+4. Check Group Privacy is off if messages aren't being seen
+
+### Wrong trigger word registered
+
+Update the trigger directly in SQLite with a quick node script:
+
+```javascript
+// scripts/fix-trigger.mjs
+import Database from 'better-sqlite3';
+const db = new Database('store/messages.db');
+db.prepare("UPDATE registered_groups SET trigger_pattern = '@Tom' WHERE folder = '<folder>'").run();
+db.close();
+```
+
+```bash
+node scripts/fix-trigger.mjs && rm scripts/fix-trigger.mjs
+```
+
+### Group responds but uses wrong persona
+
+The `groups/<folder>/CLAUDE.md` was not created or contains incorrect content. Edit it and the next container run will pick up the changes automatically — no rebuild needed.
