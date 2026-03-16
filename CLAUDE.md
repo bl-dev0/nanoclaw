@@ -59,6 +59,10 @@ systemctl --user restart nanoclaw
 
 **WhatsApp not connecting after upgrade:** WhatsApp is now a separate channel fork, not bundled in core. Run `/add-whatsapp` (or `git remote add whatsapp https://github.com/qwibitai/nanoclaw-whatsapp.git && git fetch whatsapp main && (git merge whatsapp/main || { git checkout --theirs package-lock.json && git add package-lock.json && git merge --continue; }) && npm run build`) to install it. Existing auth credentials and groups are preserved.
 
+## Adding Integrations
+
+Never modify `src/container-runner.ts`, `container/agent-runner/src/index.ts`, or other core files directly to add integrations. Always create or use a skill in `.claude/skills/`. The `.mcp.json` approach does not work for container-based integrations — MCP servers must be bind-mounted via `container-runner.ts` and registered in `container/agent-runner/src/index.ts`, which is what the skills document.
+
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
