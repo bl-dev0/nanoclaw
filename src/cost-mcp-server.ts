@@ -12,11 +12,56 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Database from 'better-sqlite3';
-import {
-  getMonthlyCostReport,
-  getDailyCost,
-  getProjectedMonthlyCost,
-} from './cost-tracker.js';
+
+// SQL queries inlined to avoid importing cost-tracker.ts (which pulls in
+// the host logger chain and causes failures when run inside the container).
+
+function getMonthlyCostReport(db: Database.Database) {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const since = monthStart.toISOString();
+
+  const { total } = db.prepare(
+    `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM api_usage WHERE timestamp >= ?`,
+  ).get(since) as { total: number };
+
+  const byGroup = db.prepare(
+    `SELECT group_jid, SUM(estimated_cost_usd) as cost, COUNT(*) as messages
+     FROM api_usage WHERE timestamp >= ? GROUP BY group_jid ORDER BY cost DESC`,
+  ).all(since) as { group_jid: string; cost: number; messages: number }[];
+
+  const byDay = db.prepare(
+    `SELECT strftime('%Y-%m-%d', timestamp) as date, SUM(estimated_cost_usd) as cost
+     FROM api_usage WHERE timestamp >= ? GROUP BY date ORDER BY date DESC LIMIT 30`,
+  ).all(since) as { date: string; cost: number }[];
+
+  const tokens = db.prepare(
+    `SELECT COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output,
+            COALESCE(SUM(cache_write_tokens),0) as cache_write, COALESCE(SUM(cache_read_tokens),0) as cache_read
+     FROM api_usage WHERE timestamp >= ?`,
+  ).get(since) as { input: number; output: number; cache_write: number; cache_read: number };
+
+  return { total_usd: total, by_group: byGroup, by_day: byDay, token_breakdown: tokens };
+}
+
+function getDailyCost(db: Database.Database): number {
+  const today = new Date().toISOString().slice(0, 10);
+  const { total } = db.prepare(
+    `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM api_usage WHERE timestamp LIKE ?`,
+  ).get(`${today}%`) as { total: number };
+  return total;
+}
+
+function getProjectedMonthlyCost(db: Database.Database): number {
+  const { avg } = db.prepare(
+    `SELECT COALESCE(AVG(daily_cost), 0) as avg FROM (
+       SELECT strftime('%Y-%m-%d', timestamp) as day, SUM(estimated_cost_usd) as daily_cost
+       FROM api_usage WHERE timestamp >= date('now', '-7 days') GROUP BY day
+     )`,
+  ).get() as { avg: number };
+  return avg * 30;
+}
 
 const DB_PATH = process.env.DB_PATH ?? './store/messages.db';
 const MONTHLY_BUDGET = parseFloat(process.env.MONTHLY_BUDGET_USD ?? '25');

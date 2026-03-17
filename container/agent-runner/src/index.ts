@@ -460,14 +460,16 @@ async function runQuery(
           command: 'node',
           args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
         },
-        'cost-monitoring': {
-          command: 'node',
-          args: ['/home/jorge/nanoclaw/dist/cost-mcp-server.js'],
-          env: {
-            DB_PATH: '/home/jorge/nanoclaw/store/messages.db',
-            MONTHLY_BUDGET_USD: '25',
+        ...(fs.existsSync('/app/dist/cost-mcp-server.js') ? {
+          'cost-monitoring': {
+            command: 'node',
+            args: ['/app/dist/cost-mcp-server.js'],
+            env: {
+              DB_PATH: '/workspace/store/messages.db',
+              MONTHLY_BUDGET_USD: process.env.MONTHLY_BUDGET_USD ?? '25',
+            },
           },
-        },
+        } : {}),
         ...(fs.existsSync('/usr/local/lib/memory-mcp-server.js') ? {
           memory: {
             command: 'node',

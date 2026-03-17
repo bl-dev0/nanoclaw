@@ -14,32 +14,49 @@ any existing file, read it completely to understand its current structure.
 
 ---
 
-### Step 0 — Install dependencies
+### Step 0 — Ask for monthly budget
 
-`better-sqlite3` is required for both `cost-tracker.ts` and the MCP server. Install it now if it is not already present:
+**Ask the user:** "What is your monthly API budget in USD? (e.g., 25)"
+
+Wait for their answer. Then save it to the environment in two places:
+
+**`.env` file** — append or update the variable:
+```bash
+grep -q '^MONTHLY_BUDGET_USD=' ~/nanoclaw/.env \
+  && sed -i 's/^MONTHLY_BUDGET_USD=.*/MONTHLY_BUDGET_USD=<VALUE>/' ~/nanoclaw/.env \
+  || echo 'MONTHLY_BUDGET_USD=<VALUE>' >> ~/nanoclaw/.env
+```
+
+**Systemd unit override** (Linux VPS) — the service does not inherit `.env`
+automatically, so the variable must also be set in the unit:
+```bash
+systemctl --user cat nanoclaw 2>/dev/null | grep -q MONTHLY_BUDGET_USD \
+  && echo "Already set in unit — update it manually with: systemctl --user edit nanoclaw" \
+  || systemctl --user edit nanoclaw --force
+```
+If the file opens, add under `[Service]`:
+```ini
+Environment=MONTHLY_BUDGET_USD=<VALUE>
+```
+
+> Replace `<VALUE>` with the number the user provided.
+> To change the budget later, use the `/set-monthly-budget` skill.
+
+---
+
+### Step 1 — Install host dependencies
+
+`better-sqlite3` is required on the **host** for `cost-tracker.ts` and the
+host-side alert logic. Install it if not already present:
 
 ```bash
 cd ~/nanoclaw
 node -e "require('better-sqlite3')" 2>/dev/null && echo "better-sqlite3 OK" || npm install better-sqlite3 && npm install --save-dev @types/better-sqlite3
 ```
 
-Verify FTS5 is available (needed by the memory skill, but good to confirm the binary is healthy):
-
-```bash
-node -e "const db = require('better-sqlite3')(':memory:'); db.exec('CREATE VIRTUAL TABLE t USING fts5(c)'); console.log('better-sqlite3 OK');"
-```
-
-If this fails, rebuild the native addon:
-
-```bash
-npm rebuild better-sqlite3
-```
-
 ---
 
-### Step 1 — Create the `api_usage` SQLite table
-
-Run this bash command to add the table to the existing database:
+### Step 2 — Create the `api_usage` SQLite table
 
 ```bash
 sqlite3 ~/nanoclaw/store/messages.db << 'EOF'
@@ -60,23 +77,23 @@ CREATE INDEX IF NOT EXISTS idx_api_usage_group     ON api_usage(group_jid);
 EOF
 ```
 
-Verify the table exists:
-
+Verify:
 ```bash
 sqlite3 ~/nanoclaw/store/messages.db ".tables" | grep api_usage
 ```
 
 ---
 
-### Step 2 — Create `src/cost-tracker.ts`
+### Step 3 — Create `src/cost-tracker.ts`
 
-Create the file `src/cost-tracker.ts` with the following exact content:
+Create the file `src/cost-tracker.ts`:
 
 ```typescript
 import Database from 'better-sqlite3';
+import path from 'path';
 
-// ─── Per-token pricing (USD per individual token, not per million) ──────────
-// Source: https://anthropic.com/pricing — update if prices change
+import { STORE_DIR } from './config.js';
+
 const PRICING: Record<string, {
   input: number; output: number; cacheWrite: number; cacheRead: number;
 }> = {
@@ -102,16 +119,12 @@ const PRICING: Record<string, {
 
 const DEFAULT_PRICING = PRICING['claude-sonnet-4-20250514'];
 
-// ─── Types ──────────────────────────────────────────────────────────────────
-
 export interface UsageData {
   input_tokens: number;
   output_tokens: number;
   cache_creation_input_tokens?: number;
   cache_read_input_tokens?: number;
 }
-
-// ─── Cost calculation ───────────────────────────────────────────────────────
 
 export function calculateCost(model: string, usage: UsageData): number {
   const p = PRICING[model] ?? DEFAULT_PRICING;
@@ -123,14 +136,12 @@ export function calculateCost(model: string, usage: UsageData): number {
   );
 }
 
-// ─── Write ──────────────────────────────────────────────────────────────────
-
 export function logUsage(
   db: Database.Database,
   groupJid: string,
   model: string,
   usage: UsageData,
-  metadata?: object
+  metadata?: object,
 ): void {
   const cost = calculateCost(model, usage);
   db.prepare(`
@@ -148,11 +159,25 @@ export function logUsage(
     usage.cache_creation_input_tokens       ?? 0,
     usage.cache_read_input_tokens           ?? 0,
     cost,
-    metadata ? JSON.stringify(metadata) : null
+    metadata ? JSON.stringify(metadata) : null,
   );
 }
 
-// ─── Queries ─────────────────────────────────────────────────────────────────
+// Convenience wrapper: opens its own connection to the default DB path
+export function logUsageToDb(
+  groupJid: string,
+  model: string,
+  usage: UsageData,
+  metadata?: object,
+): void {
+  const dbPath = path.join(STORE_DIR, 'messages.db');
+  const db = new Database(dbPath);
+  try {
+    logUsage(db, groupJid, model, usage, metadata);
+  } finally {
+    db.close();
+  }
+}
 
 export function getMonthlyCostReport(db: Database.Database) {
   const monthStart = new Date();
@@ -162,19 +187,19 @@ export function getMonthlyCostReport(db: Database.Database) {
 
   const { total } = db.prepare(
     `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total
-     FROM api_usage WHERE timestamp >= ?`
+     FROM api_usage WHERE timestamp >= ?`,
   ).get(since) as { total: number };
 
   const byGroup = db.prepare(
     `SELECT group_jid, SUM(estimated_cost_usd) as cost, COUNT(*) as messages
      FROM api_usage WHERE timestamp >= ?
-     GROUP BY group_jid ORDER BY cost DESC`
+     GROUP BY group_jid ORDER BY cost DESC`,
   ).all(since) as { group_jid: string; cost: number; messages: number }[];
 
   const byDay = db.prepare(
     `SELECT strftime('%Y-%m-%d', timestamp) as date, SUM(estimated_cost_usd) as cost
      FROM api_usage WHERE timestamp >= ?
-     GROUP BY date ORDER BY date DESC LIMIT 30`
+     GROUP BY date ORDER BY date DESC LIMIT 30`,
   ).all(since) as { date: string; cost: number }[];
 
   const tokens = db.prepare(
@@ -183,7 +208,7 @@ export function getMonthlyCostReport(db: Database.Database) {
        COALESCE(SUM(output_tokens),      0) as output,
        COALESCE(SUM(cache_write_tokens), 0) as cache_write,
        COALESCE(SUM(cache_read_tokens),  0) as cache_read
-     FROM api_usage WHERE timestamp >= ?`
+     FROM api_usage WHERE timestamp >= ?`,
   ).get(since) as { input: number; output: number; cache_write: number; cache_read: number };
 
   return { total_usd: total, by_group: byGroup, by_day: byDay, token_breakdown: tokens };
@@ -193,7 +218,7 @@ export function getDailyCost(db: Database.Database): number {
   const today = new Date().toISOString().slice(0, 10);
   const { total } = db.prepare(
     `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total
-     FROM api_usage WHERE timestamp LIKE ?`
+     FROM api_usage WHERE timestamp LIKE ?`,
   ).get(`${today}%`) as { total: number };
   return total;
 }
@@ -215,18 +240,17 @@ export function getProjectedMonthlyCost(db: Database.Database): number {
 
 ---
 
-### Step 3 — Create `src/cost-mcp-server.ts`
+### Step 4 — Create `src/cost-mcp-server.ts`
 
-Create the file `src/cost-mcp-server.ts`:
+> **Critical:** Do NOT import from `./cost-tracker.js` or any other host
+> module here. The MCP server is bundled into a self-contained file for the
+> container (Step 8), and importing host modules like `cost-tracker.ts` would
+> pull in the entire host dependency chain (`config.ts` → `logger.ts` →
+> `pino` → `pino-pretty`), which are not available in the container and cause
+> silent startup failures. All SQL queries must be inlined directly.
 
 ```typescript
 #!/usr/bin/env node
-/**
- * MCP server for API cost monitoring.
- * Runs on the host, communicates with the container via stdio.
- * Exposes one tool: get_cost_report
- */
-
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
@@ -234,18 +258,61 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import Database from 'better-sqlite3';
-import {
-  getMonthlyCostReport,
-  getDailyCost,
-  getProjectedMonthlyCost,
-} from './cost-tracker.js';
 
-const DB_PATH          = process.env.DB_PATH          ?? './store/messages.db';
-const MONTHLY_BUDGET   = parseFloat(process.env.MONTHLY_BUDGET_USD ?? '25');
+const DB_PATH        = process.env.DB_PATH        ?? './store/messages.db';
+const MONTHLY_BUDGET = parseFloat(process.env.MONTHLY_BUDGET_USD ?? '25');
+
+// SQL queries inlined — do NOT import from cost-tracker.ts (see note above)
+function getMonthlyCostReport(db: Database.Database) {
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const since = monthStart.toISOString();
+
+  const { total } = db.prepare(
+    `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM api_usage WHERE timestamp >= ?`,
+  ).get(since) as { total: number };
+
+  const byGroup = db.prepare(
+    `SELECT group_jid, SUM(estimated_cost_usd) as cost, COUNT(*) as messages
+     FROM api_usage WHERE timestamp >= ? GROUP BY group_jid ORDER BY cost DESC`,
+  ).all(since) as { group_jid: string; cost: number; messages: number }[];
+
+  const byDay = db.prepare(
+    `SELECT strftime('%Y-%m-%d', timestamp) as date, SUM(estimated_cost_usd) as cost
+     FROM api_usage WHERE timestamp >= ? GROUP BY date ORDER BY date DESC LIMIT 30`,
+  ).all(since) as { date: string; cost: number }[];
+
+  const tokens = db.prepare(
+    `SELECT COALESCE(SUM(input_tokens),0) as input, COALESCE(SUM(output_tokens),0) as output,
+            COALESCE(SUM(cache_write_tokens),0) as cache_write, COALESCE(SUM(cache_read_tokens),0) as cache_read
+     FROM api_usage WHERE timestamp >= ?`,
+  ).get(since) as { input: number; output: number; cache_write: number; cache_read: number };
+
+  return { total_usd: total, by_group: byGroup, by_day: byDay, token_breakdown: tokens };
+}
+
+function getDailyCost(db: Database.Database): number {
+  const today = new Date().toISOString().slice(0, 10);
+  const { total } = db.prepare(
+    `SELECT COALESCE(SUM(estimated_cost_usd), 0) as total FROM api_usage WHERE timestamp LIKE ?`,
+  ).get(`${today}%`) as { total: number };
+  return total;
+}
+
+function getProjectedMonthlyCost(db: Database.Database): number {
+  const { avg } = db.prepare(`
+    SELECT COALESCE(AVG(daily_cost), 0) as avg FROM (
+      SELECT strftime('%Y-%m-%d', timestamp) as day, SUM(estimated_cost_usd) as daily_cost
+      FROM api_usage WHERE timestamp >= date('now', '-7 days') GROUP BY day
+    )
+  `).get() as { avg: number };
+  return avg * 30;
+}
 
 const server = new Server(
   { name: 'cost-monitoring', version: '1.0.0' },
-  { capabilities: { tools: {} } }
+  { capabilities: { tools: {} } },
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
@@ -256,11 +323,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         'Returns API cost breakdown for the current month: total spent, ' +
         'breakdown by group, daily costs, token counts, and projected end-of-month cost. ' +
         'Use this when the user asks about API spending, cost, or usage.',
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-      },
+      inputSchema: { type: 'object', properties: {}, required: [] },
     },
   ],
 }));
@@ -304,23 +367,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     const t = report.token_breakdown;
+    const fmt = (n: number) => ((n ?? 0) / 1000).toFixed(1);
     lines.push(`Tokens this month:`);
     lines.push(`  Input:       ${fmt(t.input)}K`);
     lines.push(`  Output:      ${fmt(t.output)}K`);
     lines.push(`  Cache read:  ${fmt(t.cache_read)}K  (90% discount)`);
     lines.push(`  Cache write: ${fmt(t.cache_write)}K`);
 
-    return {
-      content: [{ type: 'text', text: lines.join('\n') }],
-    };
+    return { content: [{ type: 'text', text: lines.join('\n') }] };
   } finally {
     db.close();
   }
 });
-
-function fmt(n: number): string {
-  return ((n ?? 0) / 1000).toFixed(1);
-}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
@@ -328,75 +386,108 @@ await server.connect(transport);
 
 ---
 
-### Step 4 — Logging hook in `container-runner.ts`
+### Step 5 — Add `better-sqlite3` to the agent-runner container
 
-Read `src/container-runner.ts` completely. Locate where Agent SDK responses
-are processed by looking for:
-- The function that runs the agent (may be called `runAgent`, `runContainer`,
-  `executeAgent`, or similar)
-- The `for await` loop iterating over SDK events
-- Any reference to `type: 'message'`, `usage`, `input_tokens`, or
-  `output_tokens` in the response flow
+Read `container/agent-runner/package.json`. Add `better-sqlite3` to `dependencies`:
 
-Once located, add the import at the top of the file:
-
-```typescript
-import { logUsage } from './cost-tracker.js';
+```json
+"better-sqlite3": "^11.9.1",
 ```
 
-And inside the event loop, add the hook where usage data appears.
-The exact pattern depends on the SDK version. Look for one of these:
-
-**Pattern A** — `message` type events:
-```typescript
-if (event.type === 'message' && event.message?.usage) {
-  logUsage(db, groupJid, event.message.model ?? 'claude-sonnet-4-20250514', event.message.usage);
-}
-```
-
-**Pattern B** — final result with usage:
-```typescript
-if (result?.usage) {
-  logUsage(db, groupJid, result.model ?? 'claude-sonnet-4-20250514', result.usage);
-}
-```
-
-**Pattern C** — stream with `finalMessage`:
-```typescript
-if (stream.finalMessage?.usage) {
-  logUsage(db, groupJid, stream.finalMessage.model ?? 'claude-sonnet-4-20250514', stream.finalMessage.usage);
-}
-```
-
-Use whichever pattern matches the actual code structure. If usage data appears
-at multiple points (e.g., intermediate messages and the final message), use
-**only the final message** to avoid double-counting.
-
-Make sure the `db` variable (better-sqlite3 instance) is in scope where you
-add the hook. If not, pass it as a parameter or open it locally.
+> **Why:** The MCP server runs inside the Docker container. The container's
+> base image has a different glibc version than the host, so the host-compiled
+> `better-sqlite3.node` binary cannot be used inside the container (you get
+> `GLIBC_X.XX not found`). Adding it here causes Docker to compile the native
+> addon inside the container during image build, against the correct glibc.
 
 ---
 
-### Step 5 — Modify `container/agent-runner/src/index.ts`
+### Step 6 — Bind-mounts and logging hook in `container-runner.ts`
 
-Read the full file. Locate:
-1. The `mcpServers` object (where github, google-calendar, etc. are registered)
-2. The `allowedTools` array (where `mcp__github__*` patterns are listed)
+Read `src/container-runner.ts` completely.
 
-Add to the `mcpServers` object:
+**6a — Add bind-mounts for the MCP bundle and store directory**
+
+Find the memory MCP binary mount (search for `memory-mcp-server.js`) and add
+immediately after it:
 
 ```typescript
-'cost-monitoring': {
-  command: 'node',
-  args: [`${process.env.HOME}/nanoclaw/dist/cost-mcp-server.js`],
-  env: {
-    DB_PATH: `${process.env.HOME}/nanoclaw/store/messages.db`,
-    MONTHLY_BUDGET_USD: process.env.MONTHLY_BUDGET_USD ?? '25',
-  },
-},
+// Cost monitoring MCP: bundle mounted at /app/dist/ so Node.js finds
+// /app/node_modules/better-sqlite3 (compiled for the container's glibc).
+const costMcpBundle = path.join(process.cwd(), 'dist', 'cost-mcp-bundle.js');
+if (fs.existsSync(costMcpBundle)) {
+  mounts.push({
+    hostPath: costMcpBundle,
+    containerPath: '/app/dist/cost-mcp-server.js',
+    readonly: true,
+  });
+}
+
+// Cost monitoring DB: store directory read-only so the MCP can query it
+const storeDir = path.join(process.cwd(), 'store');
+if (fs.existsSync(storeDir)) {
+  mounts.push({
+    hostPath: storeDir,
+    containerPath: '/workspace/store',
+    readonly: true,
+  });
+}
 ```
 
-Add to the `allowedTools` array:
+> **Why `/app/dist/` and not `/usr/local/lib/`:** Node.js ESM module
+> resolution for bare specifiers (like `better-sqlite3`) starts from the
+> importing file's directory and walks up. Mounting at `/app/dist/` means
+> resolution reaches `/app/node_modules/` where the container-compiled
+> `better-sqlite3` lives. From `/usr/local/lib/` the resolution never reaches
+> `/app/node_modules/` and the import fails.
+
+**6b — Add the usage logging hook**
+
+Add the import at the top of `container-runner.ts`:
+
+```typescript
+import { logUsageToDb, UsageData } from './cost-tracker.js';
+```
+
+Locate where the container output is parsed — look for `OUTPUT_START_MARKER`,
+`parsed.usage`, or `output_tokens` in the streaming output handler. Add the
+hook where usage data first appears on a successful output:
+
+```typescript
+if (parsed.usage && parsed.result) {
+  logUsageToDb(
+    input.chatJid,
+    parsed.model ?? 'claude-sonnet-4-20250514',
+    parsed.usage,
+  );
+}
+```
+
+Use only the final message to avoid double-counting.
+
+---
+
+### Step 7 — Modify `container/agent-runner/src/index.ts`
+
+Read the full file. Locate the `mcpServers` object and `allowedTools` array.
+
+Add to `mcpServers`, guarded by `fs.existsSync` (same pattern as the memory
+MCP — search for `memory-mcp-server.js` in the file to see the pattern):
+
+```typescript
+...(fs.existsSync('/app/dist/cost-mcp-server.js') ? {
+  'cost-monitoring': {
+    command: 'node',
+    args: ['/app/dist/cost-mcp-server.js'],
+    env: {
+      DB_PATH: '/workspace/store/messages.db',
+      MONTHLY_BUDGET_USD: process.env.MONTHLY_BUDGET_USD ?? '25',
+    },
+  },
+} : {}),
+```
+
+Add to `allowedTools`:
 
 ```typescript
 'mcp__cost-monitoring__get_cost_report',
@@ -404,12 +495,37 @@ Add to the `allowedTools` array:
 
 ---
 
-### Step 6 — Alert logic in `src/index.ts`
+### Step 8 — Update `package.json` build script and compile
 
-Read `src/index.ts` completely. Locate:
-- The function or point where NanoClaw sends proactive messages to the main chat
-  (the same function that scheduled tasks use to send notifications)
-- The main message processing loop
+Read `package.json`. Update the `build` script to also generate the
+self-contained MCP bundle after the TypeScript compile:
+
+```json
+"build": "tsc && npx esbuild src/cost-mcp-server.ts --bundle --platform=node --format=esm --external:better-sqlite3 --external:'@modelcontextprotocol/*' --outfile=dist/cost-mcp-bundle.js",
+```
+
+Then build:
+
+```bash
+cd ~/nanoclaw && npm run build
+```
+
+Verify the bundle was created:
+
+```bash
+ls -lh ~/nanoclaw/dist/cost-mcp-bundle.js
+# Should be ~5kb (only SQL + MCP logic, no host deps)
+```
+
+> If the bundle is larger than ~20kb, the esbuild command is accidentally
+> including host modules. Check that all non-container deps are in `--external`.
+
+---
+
+### Step 9 — Alert logic in `src/index.ts`
+
+Read `src/index.ts` completely. Locate the function that sends proactive
+messages to the main chat (used by scheduled tasks).
 
 Add the import at the top:
 
@@ -420,11 +536,10 @@ import { getMonthlyCostReport } from './cost-tracker.js';
 Add this function in the module (outside the main loop):
 
 ```typescript
-const MONTHLY_BUDGET_USD  = 25;
+const MONTHLY_BUDGET_USD  = parseFloat(process.env.MONTHLY_BUDGET_USD ?? '25');
 const ALERT_WARN_PCT      = 0.80;
 const ALERT_CRITICAL_PCT  = 0.95;
 
-// In-memory tracking to avoid spamming (resets on process restart)
 const budgetAlertsToday = new Set<string>();
 let budgetAlertDate     = new Date().toISOString().slice(0, 10);
 
@@ -432,7 +547,6 @@ async function checkBudgetAlert(
   db: Database.Database,
   sendMessage: (text: string) => Promise<void>
 ): Promise<void> {
-  // Reset flags if the day changed
   const today = new Date().toISOString().slice(0, 10);
   if (today !== budgetAlertDate) {
     budgetAlertsToday.clear();
@@ -462,33 +576,17 @@ async function checkBudgetAlert(
 }
 ```
 
-Call `checkBudgetAlert(db, sendToMain)` **after each agent response** that
-logged usage. Use the same `sendToMain` function (or equivalent) that
-scheduled tasks use to send proactive messages to the main Telegram chat.
+Call `checkBudgetAlert(db, sendToMain)` after each agent response that logged
+usage. Use the same `sendToMain` (or equivalent) that scheduled tasks use.
 
 ---
 
-### Step 7 — Compile TypeScript
+### Step 10 — Rebuild Docker image
 
-```bash
-cd ~/nanoclaw
-npm run build
-```
-
-If the command fails, try:
-
-```bash
-npx tsc --noEmit  # Type-check only
-npx tsc           # Compile
-```
-
-Fix any type errors before continuing. Most likely errors:
-- `db` not in scope at the hook location → pass it as a parameter
-- `usage` type not recognized → add `as any` temporarily if the SDK doesn't export the type
-
----
-
-### Step 8 — Rebuild Docker image
+The Docker image must be rebuilt because `better-sqlite3` was added to the
+agent-runner dependencies (Step 5). It needs to be compiled inside the
+container against the container's glibc — you cannot mount the host-compiled
+binary since the container may have a different glibc version.
 
 ```bash
 docker build -t nanoclaw-agent:latest \
@@ -496,17 +594,12 @@ docker build -t nanoclaw-agent:latest \
   ~/nanoclaw/container/
 ```
 
-Wait for it to complete without errors.
-
 ---
 
-### Step 9 — Clear cache and restart
+### Step 11 — Clear cache and restart
 
 ```bash
-# Clear session cache to force container recreation
 rm -rf ~/nanoclaw/data/sessions/*/agent-runner-src
-
-# Restart the service
 systemctl --user restart nanoclaw
 sleep 3
 systemctl --user status nanoclaw
@@ -514,34 +607,30 @@ systemctl --user status nanoclaw
 
 ---
 
-### Step 10 — Verification
+### Step 12 — Verification
 
-**10.1 Verify empty table (expected at start):**
+**12.1 Verify the MCP bundle works inside the container:**
 ```bash
-sqlite3 ~/nanoclaw/store/messages.db \
-  "SELECT COUNT(*) FROM api_usage;"
-# Should return: 0
+printf '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_cost_report","arguments":{}}}\n' \
+  | docker run --rm -i \
+    --entrypoint node \
+    -v ~/nanoclaw/dist/cost-mcp-bundle.js:/app/dist/cost-mcp-server.js:ro \
+    -v ~/nanoclaw/store:/workspace/store:ro \
+    -e DB_PATH=/workspace/store/messages.db \
+    nanoclaw-agent:latest \
+    /app/dist/cost-mcp-server.js 2>&1
+# Should return a JSON response with cost data (or zeros if no data yet)
 ```
 
-**10.2 Send a test message from Telegram and verify logging:**
+**12.2 Verify usage is being logged (send a message, then check):**
 ```bash
-# Wait 10 seconds after the message, then:
 sqlite3 ~/nanoclaw/store/messages.db \
   "SELECT timestamp, group_jid, model, input_tokens, output_tokens,
           ROUND(estimated_cost_usd, 6) as cost_usd
    FROM api_usage ORDER BY id DESC LIMIT 3;"
 ```
 
-If the table is still empty after the message, the hook in `container-runner.ts`
-is not capturing usage. Revisit Step 4 — the capture point may be elsewhere
-in the code. Use:
-```bash
-grep -rn "usage\|input_tokens\|output_tokens" ~/nanoclaw/src/ --include="*.ts" \
-  | grep -v "cost-tracker\|cost-mcp"
-```
-to locate where the existing code already processes SDK usage data.
-
-**10.3 Verify MCP tool from Telegram:**
+**12.3 Ask the agent from Telegram:**
 ```
 @AssistantName, how much have I spent on the API this month?
 ```
@@ -554,22 +643,39 @@ The agent should invoke `get_cost_report` and respond with the breakdown.
 | File | Change type |
 |---|---|
 | `store/messages.db` | New `api_usage` table + indexes |
-| `src/cost-tracker.ts` | **New** — cost calculation and queries |
-| `src/cost-mcp-server.ts` | **New** — MCP tool `get_cost_report` |
-| `src/container-runner.ts` | Add import + logging hook |
-| `container/agent-runner/src/index.ts` | Add MCP server + allowedTool |
+| `src/cost-tracker.ts` | **New** — cost calculation, queries, host-side logging |
+| `src/cost-mcp-server.ts` | **New** — self-contained MCP tool (SQL inlined, no host imports) |
+| `src/container-runner.ts` | Add import + logging hook + bind-mounts for bundle and store dir |
+| `container/agent-runner/package.json` | Add `better-sqlite3` dependency |
+| `container/agent-runner/src/index.ts` | Add MCP server registration + allowedTool |
+| `package.json` | Add esbuild bundle step to `build` script |
 | `src/index.ts` | Add import + `checkBudgetAlert` function |
 
 ---
 
 ## Important notes
 
-- The MCP server (`cost-mcp-server.ts`) runs on the **host**, not inside the
-  Docker container. It communicates via stdio just like the other MCP servers.
-- The `api_usage` table uses the same `store/messages.db` database as the
-  rest of NanoClaw — no new database needed.
-- The monthly budget defaults to $25. Set `MONTHLY_BUDGET_USD` in your `.env`
-  and systemd unit override to use a different value. Keep the MCP server env var (Step 5)
-  and the constant in `src/index.ts` (Step 6) in sync.
-- If `better-sqlite3` is not available on the host (only in the container),
-  install it: `npm install better-sqlite3 @types/better-sqlite3`
+- **The MCP server runs inside the container** as a subprocess spawned via
+  stdio. It does NOT run on the host.
+
+- **`cost-mcp-server.ts` must not import from `cost-tracker.ts`** or any
+  other host module. The host codebase imports `pino`/`pino-pretty` via the
+  logger chain, which are not available in the container. The MCP server is
+  bundled with esbuild into `dist/cost-mcp-bundle.js` (~5kb) with only
+  `better-sqlite3` and `@modelcontextprotocol/sdk` as external dependencies.
+
+- **`better-sqlite3` must be compiled inside the container** (Step 5 + 10).
+  The host and container may have different glibc versions. Mounting the
+  host-compiled `.node` binary into the container causes `GLIBC_X.XX not
+  found` errors. Adding it to `container/agent-runner/package.json` and
+  rebuilding the image compiles it correctly.
+
+- **Bundle mounted at `/app/dist/`**, not `/usr/local/lib/`. Node.js ESM
+  resolution walks up from the file's directory — from `/app/dist/` it reaches
+  `/app/node_modules/` where `better-sqlite3` lives. From `/usr/local/lib/`
+  it never finds `/app/node_modules/`.
+
+- The `api_usage` table uses the same `store/messages.db` as the rest of
+  NanoClaw — no new database needed.
+
+- To change the budget after installation, use the `/set-monthly-budget` skill.

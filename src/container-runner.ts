@@ -278,6 +278,28 @@ function buildVolumeMounts(
     });
   }
 
+  // Cost monitoring MCP: mount the self-contained bundle at /app/dist/ so
+  // Node.js module resolution finds /app/node_modules/better-sqlite3
+  // (compiled for the container's glibc via the agent-runner Dockerfile).
+  const costMcpBundle = path.join(process.cwd(), 'dist', 'cost-mcp-bundle.js');
+  if (fs.existsSync(costMcpBundle)) {
+    mounts.push({
+      hostPath: costMcpBundle,
+      containerPath: '/app/dist/cost-mcp-server.js',
+      readonly: true,
+    });
+  }
+
+  // Cost monitoring DB: mount the store directory read-only so the MCP can query it
+  const storeDir = path.join(process.cwd(), 'store');
+  if (fs.existsSync(storeDir)) {
+    mounts.push({
+      hostPath: storeDir,
+      containerPath: '/workspace/store',
+      readonly: true,
+    });
+  }
+
   // Memory directory: mount per-group memory dir at /workspace/extra/memory
   // Creates the directory automatically if it doesn't exist yet.
   const memoryDir = path.join(
@@ -292,6 +314,16 @@ function buildVolumeMounts(
     containerPath: '/workspace/extra/memory',
     readonly: false,
   });
+
+  // Soul: mount the shared identity file (read-only)
+  const soulDir = path.join(os.homedir(), 'nanoclaw-data', 'soul');
+  if (fs.existsSync(soulDir)) {
+    mounts.push({
+      hostPath: soulDir,
+      containerPath: '/workspace/extra/soul',
+      readonly: true,
+    });
+  }
 
   return mounts;
 }
