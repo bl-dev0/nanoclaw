@@ -20,7 +20,6 @@ Check if `container/agent-runner/src/ollama-mcp-stdio.ts` exists. If it does, sk
 ### Check prerequisites
 
 Verify Ollama is installed and running on the host:
-
 ```bash
 ollama list
 ```
@@ -32,27 +31,24 @@ If no models are installed, suggest pulling one:
 > You need at least one model. I recommend:
 >
 > ```bash
-> ollama pull gemma3:1b    # Small, fast (1GB)
-> ollama pull llama3.2     # Good general purpose (2GB)
+> ollama pull gemma3:1b    # Small, fast (815MB)
+> ollama pull llama3.2:3b  # Good general purpose (2GB)
 > ollama pull qwen3-coder:30b  # Best for code tasks (18GB)
 > ```
 
 ## Phase 2: Apply Code Changes
 
 ### Ensure upstream remote
-
 ```bash
 git remote -v
 ```
 
 If `upstream` is missing, add it:
-
 ```bash
 git remote add upstream https://github.com/qwibitai/nanoclaw.git
 ```
 
 ### Merge the skill branch
-
 ```bash
 git fetch upstream skill/ollama-tool
 git merge upstream/skill/ollama-tool
@@ -70,7 +66,6 @@ If the merge reports conflicts, resolve them by reading the conflicted files and
 ### Copy to per-group agent-runner
 
 Existing groups have a cached copy of the agent-runner source. Copy the new files:
-
 ```bash
 for dir in data/sessions/*/agent-runner-src; do
   cp container/agent-runner/src/ollama-mcp-stdio.ts "$dir/"
@@ -79,7 +74,6 @@ done
 ```
 
 ### Validate code changes
-
 ```bash
 npm run build
 ./container/build.sh
@@ -89,24 +83,52 @@ Build must be clean before proceeding.
 
 ## Phase 3: Configure
 
-### Set Ollama host (optional)
+### Fix Ollama network binding (Linux/VPS only)
 
-By default, the MCP server connects to `http://host.docker.internal:11434` (Docker Desktop) with a fallback to `localhost`. To use a custom Ollama host, add to `.env`:
+⚠️ On Linux, Ollama binds to `127.0.0.1` by default — inaccessible from Docker containers.
+`host.docker.internal` does NOT resolve on Linux (only works on Docker Desktop for Mac/Windows).
 
+Make Ollama listen on all interfaces:
 ```bash
-OLLAMA_HOST=http://your-ollama-host:11434
+sudo systemctl edit ollama
 ```
 
-### Restart the service
+Add in the editor:
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0"
+```
 
+Apply:
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.nanoclaw  # macOS
-# Linux: systemctl --user restart nanoclaw
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+Verify it is reachable from the Docker bridge network:
+```bash
+curl http://172.17.0.1:11434/api/tags   # Must return JSON
+```
+
+### Set OLLAMA_HOST in NanoClaw (Linux/VPS only)
+
+The MCP server defaults to `host.docker.internal` which does not resolve on Linux.
+Override it with the Docker gateway IP:
+```bash
+echo 'OLLAMA_HOST=http://172.17.0.1:11434' >> .env
+echo 'OLLAMA_HOST=http://172.17.0.1:11434' >> data/env/env
+```
+
+### Clear session cache and restart
+```bash
+rm -rf data/sessions/*/agent-runner-src
+systemctl --user restart nanoclaw   # Linux
+# macOS: launchctl kickstart -k gui/$(id -u)/com.nanoclaw
 ```
 
 ## Phase 4: Verify
 
-### Test via WhatsApp
+### Test via Telegram / WhatsApp
 
 Tell the user:
 
@@ -117,20 +139,17 @@ Tell the user:
 ### Monitor activity (optional)
 
 Run the watcher script for macOS notifications when Ollama is used:
-
 ```bash
 ./scripts/ollama-watch.sh
 ```
 
 ### Check logs if needed
-
 ```bash
 tail -f logs/nanoclaw.log | grep -i ollama
 ```
 
 Look for:
-- `Agent output: ... Ollama ...` — agent used Ollama successfully
-- `[OLLAMA] >>> Generating` — generation started (if log surfacing works)
+- `[OLLAMA] >>> Generating` — generation started
 - `[OLLAMA] <<< Done` — generation completed
 
 ## Troubleshooting
@@ -144,9 +163,12 @@ The agent is trying to run `ollama` CLI inside the container instead of using th
 
 ### "Failed to connect to Ollama"
 
-1. Verify Ollama is running: `ollama list`
-2. Check Docker can reach the host: `docker run --rm curlimages/curl curl -s http://host.docker.internal:11434/api/tags`
-3. If using a custom host, check `OLLAMA_HOST` in `.env`
+On Linux/VPS, `host.docker.internal` does not resolve. Use the Docker gateway IP instead:
+
+1. Verify Ollama listens on all interfaces: `curl http://172.17.0.1:11434/api/tags` (must return JSON)
+2. If it fails, add `Environment="OLLAMA_HOST=0.0.0.0"` to the Ollama systemd unit (see Phase 3)
+3. Verify `OLLAMA_HOST=http://172.17.0.1:11434` is set in both `.env` and `data/env/env`
+4. Clear session cache: `rm -rf data/sessions/*/agent-runner-src` and restart
 
 ### Agent doesn't use Ollama tools
 
