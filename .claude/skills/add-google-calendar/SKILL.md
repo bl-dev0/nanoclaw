@@ -153,6 +153,21 @@ If the user downloaded the JSON on their local machine but NanoClaw runs on a VP
 scp ~/Downloads/client_secret_*.json user@your-vps:~/gcp-oauth.keys.json
 ```
 
+> **Security note:** `scp` from Windows does **not** preserve Unix permissions — files arrive with `0775` by default, making them world-readable by any process on the system, including Docker containers. Always fix permissions immediately after transfer.
+
+On the server, lock down the file:
+
+```bash
+chmod 600 ~/gcp-oauth.keys.json
+```
+
+Verify:
+
+```bash
+ls -la ~/gcp-oauth.keys.json
+# Expected output: -rw------- 1 <user> <user> ... gcp-oauth.keys.json
+```
+
 Or paste the JSON content directly into `~/gcp-oauth.keys.json` on the server.
 
 ### Add GOOGLE_OAUTH_CREDENTIALS to .env
@@ -212,6 +227,19 @@ ls ~/.config/google-calendar-mcp/tokens.json && echo "Tokens saved successfully"
 ```
 
 If the file doesn't exist, the auth flow didn't complete. Re-run it with the SSH tunnel in place.
+
+Lock down the token file permissions:
+
+```bash
+chmod 600 ~/.config/google-calendar-mcp/tokens.json
+```
+
+Verify:
+
+```bash
+ls -la ~/.config/google-calendar-mcp/tokens.json
+# Expected output: -rw------- 1 <user> <user> ... tokens.json
+```
 
 ### Reload and restart the service
 

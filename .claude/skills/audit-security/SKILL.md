@@ -243,12 +243,21 @@ TRACKED=$(git ls-files data/env/ 2>/dev/null)
 ```bash
 ENV_PERMS=$(stat -c "%a" data/env/env 2>/dev/null)
 DB_PERMS=$(stat -c "%a" store/messages.db 2>/dev/null)
+GCP_CREDS_PERMS=$(stat -c "%a" ~/gcp-oauth.keys.json 2>/dev/null)
+GCP_TOKENS_PERMS=$(stat -c "%a" ~/.config/google-calendar-mcp/tokens.json 2>/dev/null)
 ```
 
 **Evaluation and auto-fix (ask for confirmation first):**
 - If `ENV_PERMS != 600` → `log_warn "data/env/env has permissions $ENV_PERMS, should be 600"` and ask: "Fix permissions with chmod 600 data/env/env? [y/n]"
 - If `DB_PERMS != 600` → same process for store/messages.db
 - If both are 600 → `log_ok "Sensitive file permissions correct (600)"`
+- If `GCP_CREDS_PERMS` is set and `!= 600` → `log_fail "~/gcp-oauth.keys.json has permissions $GCP_CREDS_PERMS, should be 600 — any process on the system (including Docker containers) can read it"` and offer: `chmod 600 ~/gcp-oauth.keys.json`
+- If `GCP_CREDS_PERMS = 600` → `log_ok "~/gcp-oauth.keys.json permissions correct (600)"`
+- If `GCP_TOKENS_PERMS` is set and `!= 600` → `log_warn "~/.config/google-calendar-mcp/tokens.json has permissions $GCP_TOKENS_PERMS, should be 600"` and offer: `chmod 600 ~/.config/google-calendar-mcp/tokens.json`
+- If `GCP_TOKENS_PERMS = 600` → `log_ok "Google Calendar tokens.json permissions correct (600)"`
+- If either GCP file is not present, skip (Google Calendar not installed)
+
+> **Note:** Any file copied with `scp` from Windows must have its permissions verified immediately — Windows does not preserve Unix permissions and files arrive with `0775` by default. Run `ls -la <file>` right after transfer and `chmod 600 <file>` if needed.
 
 ### 4.4 .gitignore covers sensitive files
 
