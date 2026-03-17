@@ -175,21 +175,21 @@ SKILL_DESC=$(grep '^description:' ".claude/skills/${SKILL_NAME}/SKILL.md" | sed 
 Then create the PR (construct the body as a variable first to avoid heredoc issues):
 
 ```bash
-PR_BODY="## What this skill does
+PR_BODY="## Type of Change
+
+- [x] **Skill** - adds a new skill in \`.claude/skills/\`
+
+## Description
 
 ${SKILL_DESC}
 
-## How to use it
-
 Run \`/${SKILL_NAME}\` in Claude Code from the root of a NanoClaw installation.
 
-## Checklist
+## For Skills
 
-- [ ] Tested on a fresh NanoClaw clone
-- [ ] Only \`.claude/skills/${SKILL_NAME}/\` is modified (no src/, container/, package.json changes)
-- [ ] Skill is written in English
-- [ ] Generic placeholders used for paths and names (e.g. \`<your-group-folder>\`, \`<AssistantName>\`)
-- [ ] Instructions only — no pre-built source code committed
+- [ ] I have not made any changes to source code
+- [ ] My skill contains instructions for Claude to follow (not pre-built code)
+- [ ] I tested this skill on a fresh clone
 
 🤖 Contributed via [NanoClaw contribute-skill](https://github.com/qwibitai/nanoclaw)"
 
