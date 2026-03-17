@@ -4,6 +4,7 @@ import path from 'path';
 import {
   ASSISTANT_NAME,
   CREDENTIAL_PROXY_PORT,
+  DATA_DIR,
   IDLE_TIMEOUT,
   POLL_INTERVAL,
   TIMEZONE,
@@ -60,15 +61,88 @@ import {
 import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { logger } from './logger.js';
+import { getMonthlyCostReport } from './cost-tracker.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
+
+const MONTHLY_BUDGET_USD  = 25;
+const ALERT_WARN_PCT      = 0.80;
+const ALERT_CRITICAL_PCT  = 0.95;
+
+// In-memory tracking to avoid spamming alerts (resets on process restart)
+const budgetAlertsToday = new Set<string>();
+let budgetAlertDate     = new Date().toISOString().slice(0, 10);
+
+async function checkBudgetAlert(
+  sendMessage: (text: string) => Promise<void>
+): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  if (today !== budgetAlertDate) {
+    budgetAlertsToday.clear();
+    budgetAlertDate = today;
+  }
+
+  try {
+    const { default: Database } = await import('better-sqlite3');
+    const { STORE_DIR } = await import('./config.js');
+    const path = await import('path');
+    const db = new Database(path.join(STORE_DIR, 'messages.db'), { readonly: true });
+    try {
+      const report = getMonthlyCostReport(db);
+      const pct    = report.total_usd / MONTHLY_BUDGET_USD;
+
+      if (pct >= ALERT_CRITICAL_PCT && !budgetAlertsToday.has('critical')) {
+        budgetAlertsToday.add('critical');
+        await sendMessage(
+          `🚨 *ALERTA CRÍTICA — Presupuesto API*\n` +
+          `${(pct * 100).toFixed(0)}% consumido: ` +
+          `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}\n` +
+          `Quedan $${(MONTHLY_BUDGET_USD - report.total_usd).toFixed(2)}. ` +
+          `Considera reducir tareas programadas.`
+        );
+      } else if (pct >= ALERT_WARN_PCT && !budgetAlertsToday.has('warning')) {
+        budgetAlertsToday.add('warning');
+        await sendMessage(
+          `⚠️ *Aviso de presupuesto API*\n` +
+          `${(pct * 100).toFixed(0)}% consumido este mes: ` +
+          `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}`
+        );
+      }
+    } finally {
+      db.close();
+    }
+  } catch (err) {
+    logger.warn({ err }, 'Budget alert check failed');
+  }
+}
 
 let lastTimestamp = '';
 let sessions: Record<string, string> = {};
 let registeredGroups: Record<string, RegisteredGroup> = {};
 let lastAgentTimestamp: Record<string, string> = {};
 let messageLoopRunning = false;
+
+const flushTriggered: Record<string, boolean> = {};
+const TOKEN_FLUSH_THRESHOLD = 0.75;
+const ESTIMATED_CONTEXT_WINDOW = 200_000; // tokens
+
+function shouldTriggerMemoryFlush(groupFolder: string): boolean {
+  const sessionDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
+  try {
+    if (!fs.existsSync(sessionDir)) return false;
+    const files = fs.readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl'));
+    let totalBytes = 0;
+    for (const f of files) {
+      totalBytes += fs.statSync(path.join(sessionDir, f)).size;
+    }
+    // Rough estimate: 4 bytes per token
+    const estimatedTokens = totalBytes / 4;
+    return estimatedTokens > ESTIMATED_CONTEXT_WINDOW * TOKEN_FLUSH_THRESHOLD;
+  } catch {
+    return false;
+  }
+}
 
 const channels: Channel[] = [];
 const queue = new GroupQueue();
@@ -228,6 +302,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
+
+      // Pre-compaction memory flush: inject a save prompt when the session is
+      // approaching the context limit, at most once per session per group.
+      if (!flushTriggered[group.folder] && shouldTriggerMemoryFlush(group.folder)) {
+        flushTriggered[group.folder] = true;
+        const flushPrompt =
+          `[SISTEMA] Tu contexto de sesión está cerca del límite. Antes de continuar:\n` +
+          `1. Revisa la conversación actual y guarda un resumen en el daily log usando memory_write(target="daily")\n` +
+          `2. Si hay decisiones o preferencias nuevas, guárdalas en memoria de largo plazo usando memory_write(target="long_term")\n` +
+          `3. Después de guardar, confirma con "Memoria sincronizada" y continúa normalmente`;
+        const sent = queue.sendMessage(chatJid, flushPrompt);
+        logger.info(
+          { group: group.name, sent },
+          'Pre-compaction memory flush injected',
+        );
+      }
     }
 
     if (result.status === 'success') {
@@ -241,6 +331,18 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);
+
+  // Check budget after each agent response and alert main group if needed
+  const mainEntry = Object.entries(registeredGroups).find(([, g]) => g.isMain);
+  if (mainEntry) {
+    const [mainJid] = mainEntry;
+    const mainChannel = findChannel(channels, mainJid);
+    if (mainChannel) {
+      checkBudgetAlert((text) => mainChannel.sendMessage(mainJid, text)).catch(
+        (err) => logger.warn({ err }, 'Budget alert send failed'),
+      );
+    }
+  }
 
   if (output === 'error' || hadError) {
     // If we already sent output to the user, don't roll back the cursor —

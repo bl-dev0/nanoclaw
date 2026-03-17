@@ -29,11 +29,20 @@ interface ContainerInput {
   assistantName?: string;
 }
 
+interface UsageData {
+  input_tokens: number;
+  output_tokens: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+}
+
 interface ContainerOutput {
   status: 'success' | 'error';
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: UsageData;
+  model?: string;
 }
 
 interface SessionEntry {
@@ -336,7 +345,7 @@ async function runQuery(
   containerInput: ContainerInput,
   sdkEnv: Record<string, string | undefined>,
   resumeAt?: string,
-): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean }> {
+): Promise<{ newSessionId?: string; lastAssistantUuid?: string; closedDuringQuery: boolean; lastUsage?: UsageData; lastModel?: string }> {
   const stream = new MessageStream();
   stream.push(prompt);
 
@@ -363,6 +372,8 @@ async function runQuery(
 
   let newSessionId: string | undefined;
   let lastAssistantUuid: string | undefined;
+  let lastUsage: UsageData | undefined;
+  let lastModel: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
 
@@ -410,7 +421,9 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__google-calendar__*',
         'mcp__github__*',
-        'mcp__ollama__*'
+        'mcp__ollama__*',
+        'mcp__cost-monitoring__get_cost_report',
+        'mcp__memory__*',
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -447,6 +460,23 @@ async function runQuery(
           command: 'node',
           args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
         },
+        'cost-monitoring': {
+          command: 'node',
+          args: ['/home/jorge/nanoclaw/dist/cost-mcp-server.js'],
+          env: {
+            DB_PATH: '/home/jorge/nanoclaw/store/messages.db',
+            MONTHLY_BUDGET_USD: '25',
+          },
+        },
+        ...(fs.existsSync('/usr/local/lib/memory-mcp-server.js') ? {
+          memory: {
+            command: 'node',
+            args: ['/usr/local/lib/memory-mcp-server.js'],
+            env: {
+              MEMORY_DIR: '/workspace/extra/memory',
+            },
+          },
+        } : {}),
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
@@ -473,19 +503,26 @@ async function runQuery(
 
     if (message.type === 'result') {
       resultCount++;
-      const textResult = 'result' in message ? (message as { result?: string }).result : null;
+      const msg = message as any;
+      const textResult = msg.result ?? null;
+      if (msg.usage) {
+        lastUsage = msg.usage as UsageData;
+        lastModel = msg.model as string | undefined;
+      }
       log(`Result #${resultCount}: subtype=${message.subtype}${textResult ? ` text=${textResult.slice(0, 200)}` : ''}`);
       writeOutput({
         status: 'success',
         result: textResult || null,
-        newSessionId
+        newSessionId,
+        usage: lastUsage,
+        model: lastModel,
       });
     }
   }
 
   ipcPolling = false;
   log(`Query done. Messages: ${messageCount}, results: ${resultCount}, lastAssistantUuid: ${lastAssistantUuid || 'none'}, closedDuringQuery: ${closedDuringQuery}`);
-  return { newSessionId, lastAssistantUuid, closedDuringQuery };
+  return { newSessionId, lastAssistantUuid, closedDuringQuery, lastUsage, lastModel };
 }
 
 async function main(): Promise<void> {

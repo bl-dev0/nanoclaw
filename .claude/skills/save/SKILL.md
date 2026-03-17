@@ -63,30 +63,58 @@ If any suspicious patterns are found, warn the user:
 
 Use `AskUserQuestion` to confirm before continuing if secrets are detected.
 
-## Phase 2: Commit
+## Phase 2: Generate Commit Message
 
-### Ask for commit message
+### Analyze changes
+```bash
+git diff --staged --stat 2>/dev/null || git diff --stat
+git diff HEAD
+```
 
-AskUserQuestion: What is the commit message?
+Analyze the diff to understand what changed. Then generate a commit message following conventional commits format:
+- `feat:` for new features or capabilities
+- `fix:` for bug fixes
+- `chore:` for maintenance, dependencies, config changes
+- `docs:` for documentation only changes
+- `refactor:` for code restructuring without behavior change
+- `security:` for security-related changes
 
-Keep it short and descriptive (e.g. "Add GitHub MCP integration", "Update SpendWise Dev CLAUDE.md").
+The message format:
+- **Subject line**: under 72 characters, imperative mood, no period at end
+- **Body** (if multi-file or complex change): blank line after subject, then bullet points summarizing key changes
+
+Example for a multi-file change:
+```
+feat: add persistent memory system with FTS5 search
+
+- Add memory MCP server with memory_search, memory_write, memory_get tools
+- Mount per-group memory directories in container-runner.ts
+- Register memory tools in agent-runner
+- Update telegram_main CLAUDE.md with memory instructions
+```
+
+### Present for confirmation
+Show the generated commit message to the user using AskUserQuestion with these options:
+1. "Looks good — commit and push" → proceed to Phase 3
+2. "Edit message" → ask the user for their preferred message, then proceed
+3. "Cancel" → abort without committing
+
+## Phase 3: Commit and Push
 
 ### Stage and commit
-
 ```bash
 git add -A
 git status
 ```
 
-Confirm the staged files look correct (no `.env`, no `data/`), then commit:
-
+Confirm no `.env` or `data/` files are staged, then:
 ```bash
-git commit -m "<their message>"
+git commit -m "<generated or edited message>"
 ```
 
 If the commit fails (pre-commit hook, GPG signing, etc.), report the error and stop — do not retry with `--no-verify`.
 
-## Phase 3: Push
+## Phase 4: Push
 
 ```bash
 git push origin main

@@ -29,6 +29,7 @@ import {
 import { detectAuthMode } from './credential-proxy.js';
 import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
+import { logUsageToDb, UsageData } from './cost-tracker.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
@@ -49,6 +50,8 @@ export interface ContainerOutput {
   result: string | null;
   newSessionId?: string;
   error?: string;
+  usage?: UsageData;
+  model?: string;
 }
 
 interface VolumeMount {
@@ -265,6 +268,31 @@ function buildVolumeMounts(
     }
   }
 
+  // Memory MCP: mount the compiled server binary for all groups
+  const memoryMcpBin = path.join(process.cwd(), 'dist', 'memory-mcp-server.js');
+  if (fs.existsSync(memoryMcpBin)) {
+    mounts.push({
+      hostPath: memoryMcpBin,
+      containerPath: '/usr/local/lib/memory-mcp-server.js',
+      readonly: true,
+    });
+  }
+
+  // Memory directory: mount per-group memory dir at /workspace/extra/memory
+  // Creates the directory automatically if it doesn't exist yet.
+  const memoryDir = path.join(
+    os.homedir(),
+    'nanoclaw-data',
+    'memory',
+    group.folder,
+  );
+  fs.mkdirSync(path.join(memoryDir, 'memory'), { recursive: true });
+  mounts.push({
+    hostPath: memoryDir,
+    containerPath: '/workspace/extra/memory',
+    readonly: false,
+  });
+
   return mounts;
 }
 
@@ -427,6 +455,13 @@ export async function runContainerAgent(
             const parsed: ContainerOutput = JSON.parse(jsonStr);
             if (parsed.newSessionId) {
               newSessionId = parsed.newSessionId;
+            }
+            if (parsed.usage && parsed.result) {
+              logUsageToDb(
+                input.chatJid,
+                parsed.model ?? 'claude-sonnet-4-20250514',
+                parsed.usage,
+              );
             }
             hadStreamingOutput = true;
             // Activity detected — reset the hard timeout
