@@ -410,6 +410,7 @@ async function runQuery(
         'mcp__nanoclaw__*',
         'mcp__google-calendar__*',
         'mcp__github__*',
+        'mcp__ollama__*'
       ],
       env: sdkEnv,
       permissionMode: 'bypassPermissions',
@@ -442,6 +443,10 @@ async function runQuery(
             },
           },
         } : {}),
+        ollama: {
+          command: 'node',
+          args: [path.join(path.dirname(mcpServerPath), 'ollama-mcp-stdio.js')],
+        },
       },
       hooks: {
         PreCompact: [{ hooks: [createPreCompactHook(containerInput.assistantName)] }],
