@@ -8,6 +8,34 @@ modifying any configuration file.
 
 ---
 
+## Pre-flight: Verify required tools
+
+Before starting the audit, check that the required CLI tools are available:
+
+```bash
+MISSING=""
+for tool in jq sqlite3 curl docker ufw ss; do
+  command -v "$tool" &>/dev/null || MISSING="$MISSING $tool"
+done
+
+if [ -n "$MISSING" ]; then
+  echo "Missing tools:$MISSING"
+  echo "Install with: sudo apt-get install -y$MISSING"
+else
+  echo "All required tools available."
+fi
+```
+
+If any tools are missing, install them before continuing:
+
+```bash
+sudo apt-get install -y <missing-tools>
+```
+
+`docker` and `ufw` are typically already present on a NanoClaw VPS. `jq`, `sqlite3`, `curl`, and `ss` (from `iproute2`) are standard Ubuntu packages.
+
+---
+
 ## Phase 0: Report setup
 
 Create the report file where findings will be recorded:

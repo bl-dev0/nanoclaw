@@ -14,6 +14,29 @@ any existing file, read it completely to understand its current structure.
 
 ---
 
+### Step 0 — Install dependencies
+
+`better-sqlite3` is required for both `cost-tracker.ts` and the MCP server. Install it now if it is not already present:
+
+```bash
+cd ~/nanoclaw
+node -e "require('better-sqlite3')" 2>/dev/null && echo "better-sqlite3 OK" || npm install better-sqlite3 && npm install --save-dev @types/better-sqlite3
+```
+
+Verify FTS5 is available (needed by the memory skill, but good to confirm the binary is healthy):
+
+```bash
+node -e "const db = require('better-sqlite3')(':memory:'); db.exec('CREATE VIRTUAL TABLE t USING fts5(c)'); console.log('better-sqlite3 OK');"
+```
+
+If this fails, rebuild the native addon:
+
+```bash
+npm rebuild better-sqlite3
+```
+
+---
+
 ### Step 1 — Create the `api_usage` SQLite table
 
 Run this bash command to add the table to the existing database:
