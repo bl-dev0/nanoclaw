@@ -423,6 +423,7 @@ async function runQuery(
         'mcp__github__*',
         'mcp__ollama__*',
         'mcp__cost-monitoring__get_cost_report',
+        'mcp__cost-monitoring__get_cost_analysis',
         'mcp__memory__*',
       ],
       env: sdkEnv,
