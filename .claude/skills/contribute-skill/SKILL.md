@@ -66,7 +66,60 @@ AskUserQuestion: The skill has the following issues that should be fixed before 
 - "Skip validation and contribute anyway" → proceed with a warning in the PR description
 - "Cancel" → abort
 
-## Phase 3: Set up upstream remote
+## Phase 3: Test on a fresh clone
+
+Ask the user:
+
+AskUserQuestion: Have you tested this skill on a fresh NanoClaw clone?
+- "Yes, it worked" → proceed to Phase 4
+- "No / not yet" → walk through the test process below
+- "Skip for now" → proceed with a note in the PR that testing is pending
+
+**If not tested**, guide the user through it:
+
+> Let's test `/<skill-name>` on a fresh clone before contributing. This takes ~5 minutes and is required for the PR checklist.
+>
+> **Step 1 — Clone upstream into a temp directory:**
+> ```bash
+> git clone https://github.com/qwibitai/nanoclaw.git /tmp/nanoclaw-test
+> cd /tmp/nanoclaw-test
+> npm install
+> ```
+>
+> **Step 2 — Copy your skill into the clone:**
+> ```bash
+> mkdir -p /tmp/nanoclaw-test/.claude/skills/<skill-name>
+> cp ~/.../nanoclaw/.claude/skills/<skill-name>/SKILL.md /tmp/nanoclaw-test/.claude/skills/<skill-name>/
+> ```
+> (Adjust the source path to match where your fork lives.)
+>
+> **Step 3 — Open Claude Code in the test clone and run the skill:**
+> ```bash
+> cd /tmp/nanoclaw-test
+> claude   # or your Claude Code alias
+> ```
+> Then in Claude Code: `/<skill-name>`
+>
+> **Step 4 — Verify the skill completes without errors.** Check that:
+> - All required files are created or modified as documented
+> - `npm run build` passes after the skill applies its changes
+> - No hardcoded paths or personal references cause failures
+>
+> **Step 5 — Clean up:**
+> ```bash
+> rm -rf /tmp/nanoclaw-test
+> ```
+
+Once testing is complete, ask:
+
+AskUserQuestion: How did the test go?
+- "Passed — skill works on a fresh clone" → set `TESTED=true`, proceed to Phase 4
+- "Failed — found issues" → stop and fix the skill first, then re-run `/contribute-skill`
+- "Skip testing" → set `TESTED=false`, proceed with a warning note in the PR
+
+Store `TESTED` for use when building the PR body in Phase 7.
+
+## Phase 4: Set up upstream remote
 
 ```bash
 git remote get-url upstream 2>/dev/null || echo "MISSING"
@@ -170,6 +223,8 @@ First, get the GitHub username from the origin remote:
 ```bash
 GITHUB_USER=$(git remote get-url origin | sed 's|.*github.com[:/]||;s|\.git||' | cut -d/ -f1)
 SKILL_DESC=$(grep '^description:' ".claude/skills/${SKILL_NAME}/SKILL.md" | sed 's/^description: //')
+# Set based on TESTED variable from Phase 3: "x" if tested, " " if skipped
+TESTED_MARK="${TESTED:-false}" && [ "$TESTED_MARK" = "true" ] && TESTED_MARK="x" || TESTED_MARK=" "
 ```
 
 Then create the PR (construct the body as a variable first to avoid heredoc issues):
@@ -189,7 +244,7 @@ Run \`/${SKILL_NAME}\` in Claude Code from the root of a NanoClaw installation.
 
 - [ ] I have not made any changes to source code
 - [ ] My skill contains instructions for Claude to follow (not pre-built code)
-- [ ] I tested this skill on a fresh clone
+- [${TESTED_MARK}] I tested this skill on a fresh clone
 
 🤖 Contributed via [NanoClaw contribute-skill](https://github.com/qwibitai/nanoclaw)"
 
