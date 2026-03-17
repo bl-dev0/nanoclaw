@@ -86,3 +86,28 @@ rm -rf ~/nanoclaw/data/sessions/*/agent-runner-src
 ## Container Build Cache
 
 The container buildkit caches the build context aggressively. `--no-cache` alone does NOT invalidate COPY steps — the builder's volume retains stale files. To force a truly clean rebuild, prune the builder then re-run `./container/build.sh`.
+
+## Despliegue en VPS
+
+Operational gotchas specific to the Hetzner VPS environment (not the codebase).
+
+**Systemd user service, not system service:** The service runs under `~/.config/systemd/user/`, not `/etc/systemd/system/`. Always use `systemctl --user` commands.
+
+**Linger required for persistence:** Without linger enabled, the user session (and all user services) are killed when the SSH session disconnects:
+```bash
+sudo loginctl enable-linger jorge
+```
+Without this, the agent stops responding after logout.
+
+**Environment variables go in the systemd unit override:** Variables needed by MCP servers must be set in the unit override, not just in `.env`. The systemd unit does not inherit from `.env` automatically:
+```bash
+systemctl --user edit nanoclaw --force
+```
+Add variables under `[Service]` as `Environment=KEY=value` lines.
+
+**Clear session cache after service restart:** After restarting the service, the old agent-runner-src containers may be stale. Force recreation:
+```bash
+rm -rf ~/nanoclaw/data/sessions/*/agent-runner-src
+```
+
+**UTC vs. Europe/Madrid timezone:** The VPS timezone is set to `Europe/Madrid`, but scheduled tasks store `next_run` in UTC internally. This is expected — do not adjust task times to compensate.
