@@ -55,7 +55,7 @@ jobs:
           fi
 
           # Merge upstream main into fork's main
-          if ! git merge upstream/main --no-edit; then
+          if ! git merge upstream/main --no-edit -X theirs -- repo-tokens/; then
             echo "::error::Failed to merge upstream/main into fork main — conflicts detected"
             git merge --abort
             echo "synced=false" >> "$GITHUB_OUTPUT"
