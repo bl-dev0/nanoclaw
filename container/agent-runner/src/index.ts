@@ -447,10 +447,10 @@ async function runQuery(
             },
           },
         } : {}),
-        ...(process.env.GITHUB_TOKEN ? {
+        ...(process.env.GITHUB_TOKEN && fs.existsSync('/app/node_modules/@modelcontextprotocol/server-github/dist/index.js') ? {
           github: {
             command: 'node',
-            args: ['/usr/local/lib/mcp-server-github.js'],
+            args: ['/app/node_modules/@modelcontextprotocol/server-github/dist/index.js'],
             env: {
               GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN,
             },
@@ -470,10 +470,10 @@ async function runQuery(
             },
           },
         } : {}),
-        ...(fs.existsSync('/usr/local/lib/memory-mcp-server.js') ? {
+        ...(fs.existsSync('/app/dist/memory-mcp-server.js') ? {
           memory: {
             command: 'node',
-            args: ['/usr/local/lib/memory-mcp-server.js'],
+            args: ['/app/dist/memory-mcp-server.js'],
             env: {
               MEMORY_DIR: '/workspace/extra/memory',
             },

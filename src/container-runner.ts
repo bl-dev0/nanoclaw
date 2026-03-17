@@ -247,33 +247,32 @@ function buildVolumeMounts(
     }
   }
 
-  // GitHub MCP: mount the server binary if GITHUB_TOKEN is set
+  // GitHub MCP: mount the entire package directory so relative imports work.
+  // Must be at /app/node_modules/... so Node.js ESM resolution finds its deps.
   if (process.env.GITHUB_TOKEN) {
-    const githubBinary = path.join(
+    const githubPkgDir = path.join(
       os.homedir(),
       '.npm-global',
       'lib',
       'node_modules',
       '@modelcontextprotocol',
       'server-github',
-      'dist',
-      'index.js',
     );
-    if (fs.existsSync(githubBinary)) {
+    if (fs.existsSync(githubPkgDir)) {
       mounts.push({
-        hostPath: githubBinary,
-        containerPath: '/usr/local/lib/mcp-server-github.js',
+        hostPath: githubPkgDir,
+        containerPath: '/app/node_modules/@modelcontextprotocol/server-github',
         readonly: true,
       });
     }
   }
 
-  // Memory MCP: mount the compiled server binary for all groups
+  // Memory MCP: mount at /app/dist/ so Node.js ESM resolution reaches /app/node_modules/
   const memoryMcpBin = path.join(process.cwd(), 'dist', 'memory-mcp-server.js');
   if (fs.existsSync(memoryMcpBin)) {
     mounts.push({
       hostPath: memoryMcpBin,
-      containerPath: '/usr/local/lib/memory-mcp-server.js',
+      containerPath: '/app/dist/memory-mcp-server.js',
       readonly: true,
     });
   }

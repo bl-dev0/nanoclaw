@@ -51,25 +51,25 @@ ls ~/.npm-global/lib/node_modules/@modelcontextprotocol/server-github/dist/index
 
 Two changes are needed: mount the binary into the container, and pass the token as a container environment variable.
 
-**1. Add the binary mount** — in `buildVolumeMounts`, after the Google Calendar MCP block, add:
+**1. Add the package directory mount** — in `buildVolumeMounts`, after the Google Calendar MCP block, add:
+
+> **Why the entire package directory?** The GitHub MCP server uses relative imports (`./operations/...`). Mounting only `index.js` breaks at runtime because sibling files are missing. Additionally, mounting to `/usr/local/lib/` breaks Node.js ESM resolution — `@modelcontextprotocol/sdk` won't be found. Mounting to `/app/node_modules/` puts the package where Node can resolve its dependencies from the container's `/app/node_modules/`.
 
 ```typescript
-// GitHub MCP: mount the server binary if GITHUB_TOKEN is set
+// GitHub MCP: mount entire package dir so relative imports and deps resolve
 if (process.env.GITHUB_TOKEN) {
-  const githubBinary = path.join(
+  const githubPkgDir = path.join(
     os.homedir(),
     '.npm-global',
     'lib',
     'node_modules',
     '@modelcontextprotocol',
     'server-github',
-    'dist',
-    'index.js',
   );
-  if (fs.existsSync(githubBinary)) {
+  if (fs.existsSync(githubPkgDir)) {
     mounts.push({
-      hostPath: githubBinary,
-      containerPath: '/usr/local/lib/mcp-server-github.js',
+      hostPath: githubPkgDir,
+      containerPath: '/app/node_modules/@modelcontextprotocol/server-github',
       readonly: true,
     });
   }
@@ -98,10 +98,10 @@ Two changes are needed: register the MCP server, and whitelist its tools.
 **2. Add the `github` server to `mcpServers`** — after the `google-calendar` conditional block:
 
 ```typescript
-...(process.env.GITHUB_TOKEN ? {
+...(process.env.GITHUB_TOKEN && fs.existsSync('/app/node_modules/@modelcontextprotocol/server-github/dist/index.js') ? {
   github: {
     command: 'node',
-    args: ['/usr/local/lib/mcp-server-github.js'],
+    args: ['/app/node_modules/@modelcontextprotocol/server-github/dist/index.js'],
     env: {
       GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GITHUB_TOKEN,
     },
@@ -209,7 +209,7 @@ tail -f groups/<your-group-folder>/logs/container-*.log 2>/dev/null || ls -t gro
 
 ### MCP server not loading
 
-The most common cause is the binary not existing at the expected path. Verify:
+The most common cause is the package directory not existing at the expected path. Verify:
 
 ```bash
 ls ~/.npm-global/lib/node_modules/@modelcontextprotocol/server-github/dist/index.js
@@ -220,6 +220,10 @@ If missing, reinstall:
 ```bash
 npm install -g @modelcontextprotocol/server-github
 ```
+
+Also verify `container-runner.ts` mounts the **entire package directory** (not just `index.js`) to `/app/node_modules/@modelcontextprotocol/server-github`. Mounting only the binary to `/usr/local/lib/` will fail because:
+- The package has relative imports (`./operations/...`) that won't resolve without the full directory tree
+- Node.js ESM resolution from `/usr/local/lib/` cannot reach `/app/node_modules/@modelcontextprotocol/sdk`
 
 ### Token not reaching the container
 
@@ -274,7 +278,7 @@ To remove GitHub MCP integration:
 
 1. Remove `GITHUB_TOKEN` from `.env`
 2. Remove `Environment=GITHUB_TOKEN=...` from `~/.config/systemd/user/nanoclaw.service.d/override.conf`
-3. Remove the binary mount block from `src/container-runner.ts` (`buildVolumeMounts`)
+3. Remove the package directory mount block from `src/container-runner.ts` (`buildVolumeMounts`)
 4. Remove the `GITHUB_TOKEN` env arg from `src/container-runner.ts` (`buildContainerArgs`)
 5. Remove the `github` entry from `mcpServers` in `container/agent-runner/src/index.ts`
 6. Remove `'mcp__github__*'` from `allowedTools` in `container/agent-runner/src/index.ts`
