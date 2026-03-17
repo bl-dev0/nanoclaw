@@ -172,7 +172,7 @@ systemctl --user restart nanoclaw
 The agent-runner source is copied into per-group directories on first run. Delete the cache so the updated `index.ts` is picked up:
 
 ```bash
-rm -rf ~/nanoclaw/data/sessions/telegram_main/agent-runner-src
+rm -rf ~/nanoclaw/data/sessions/<your-group-folder>/agent-runner-src
 ```
 
 If other groups exist, clear their caches too:
@@ -202,7 +202,7 @@ Look for lines mentioning `github` MCP server initialization. Any `GITHUB_PERSON
 Container logs for a specific group:
 
 ```bash
-tail -f groups/telegram_main/logs/container-*.log 2>/dev/null || ls -t groups/telegram_main/logs/ | head -3
+tail -f groups/<your-group-folder>/logs/container-*.log 2>/dev/null || ls -t groups/<your-group-folder>/logs/ | head -3
 ```
 
 ## Troubleshooting
@@ -246,7 +246,7 @@ systemctl --user daemon-reload && systemctl --user restart nanoclaw
 The agent-runner source cache was not cleared. The old `index.ts` (without the github entry) is still running inside the container. Clear the cache:
 
 ```bash
-rm -rf ~/nanoclaw/data/sessions/telegram_main/agent-runner-src
+rm -rf ~/nanoclaw/data/sessions/<your-group-folder>/agent-runner-src
 ```
 
 ### 401 / authentication errors from GitHub

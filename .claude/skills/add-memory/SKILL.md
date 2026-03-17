@@ -4,10 +4,10 @@ Add a persistent memory system with full-text search (BM25 via SQLite FTS5) and 
 
 ## Prerequisites
 
-- NanoClaw fork with Telegram operational
-- `~/nanoclaw-data/memory/telegram_main/` directory already exists with `MEMORY.md` and `memory/` subdirectory
+- NanoClaw fork with at least one channel operational
+- `~/nanoclaw-data/memory/<your-group-folder>/` directory already exists with `MEMORY.md` and `memory/` subdirectory
 - `~/nanoclaw-data/memory` already in mount allowlist
-- `groups/telegram_main/CLAUDE.md` already has the "Sistema de memoria" section from Phase 1
+- `groups/<your-group-folder>/CLAUDE.md` already exists for the target group
 
 ## Overview
 
@@ -177,10 +177,11 @@ const groupFolder = registeredGroups[jid]?.folder;
 if (groupFolder && !flushTriggered[groupFolder] && shouldTriggerMemoryFlush(groupFolder)) {
   flushTriggered[groupFolder] = true;
   // Queue a system message for the next interaction
-  const flushPrompt = `[SISTEMA] Tu contexto de sesión está cerca del límite. Antes de continuar:
-1. Revisa la conversación actual y guarda un resumen en el daily log usando memory_write(target="daily")
-2. Si hay decisiones o preferencias nuevas, guárdalas en memoria de largo plazo usando memory_write(target="long_term")
-3. Después de guardar, confirma con "Memoria sincronizada" y continúa normalmente`;
+  // Write this prompt in the user's preferred language (the agent will respond in that language)
+  const flushPrompt = `[SYSTEM] Your session context is approaching the limit. Before continuing:
+1. Review the current conversation and save a summary to the daily log using memory_write(target="daily")
+2. If there are new decisions or preferences, save them to long-term memory using memory_write(target="long_term")
+3. After saving, confirm with "Memory synced" and continue normally`;
   // Prepend to the next message batch for this group
   // Use the same mechanism used for scheduled task messages
 }
@@ -194,15 +195,15 @@ If there's a session clear/reset mechanism, reset `flushTriggered[groupFolder] =
 
 ### Step 6: Update CLAUDE.md for MCP tools
 
-Update `groups/telegram_main/CLAUDE.md` — replace the existing "Cómo escribir memoria" subsection with tool-aware instructions:
+Update `groups/<your-group-folder>/CLAUDE.md` — add or replace the memory usage instructions with tool-aware content. Write this section in the user's preferred language (the agent reads and responds in whatever language its CLAUDE.md is written in):
 
 ```markdown
-### Cómo usar la memoria
-- **Buscar**: usa la herramienta `memory_search` con una query en lenguaje natural para encontrar información en logs anteriores y memoria de largo plazo
-- **Escribir daily log**: usa `memory_write` con `target="daily"`, `mode="append"`, y el contenido como Markdown
-- **Escribir largo plazo**: usa `memory_write` con `target="long_term"`, `section="Preferencias"` (o Decisiones/Hechos/Patrones), `mode="replace_section"` para actualizar una sección completa, o `mode="append"` para añadir al final
-- **Leer archivo específico**: usa `memory_get` con `file="MEMORY.md"`, `file="today"`, `file="yesterday"`, o `file="memory/2026-03-15.md"`
-- También puedes leer y escribir directamente los archivos en /workspace/extra/memory/ como fallback
+### How to use memory
+- **Search**: use the `memory_search` tool with a natural language query to find information in past logs and long-term memory
+- **Write daily log**: use `memory_write` with `target="daily"`, `mode="append"`, and the content as Markdown
+- **Write long-term**: use `memory_write` with `target="long_term"`, `section="Preferences"` (or Decisions/Facts/Patterns), `mode="replace_section"` to update a whole section, or `mode="append"` to add to the end
+- **Read a specific file**: use `memory_get` with `file="MEMORY.md"`, `file="today"`, `file="yesterday"`, or `file="memory/2026-03-15.md"`
+- You can also read and write files directly in /workspace/extra/memory/ as a fallback
 ```
 
 ### Step 7: Build and verify
@@ -212,14 +213,14 @@ Update `groups/telegram_main/CLAUDE.md` — replace the existing "Cómo escribir
 npm run build
 
 # Verify the MCP server starts standalone
-MEMORY_DIR=~/nanoclaw-data/memory/telegram_main node dist/memory-mcp-server.js
+MEMORY_DIR=~/nanoclaw-data/memory/<your-group-folder> node dist/memory-mcp-server.js
 # Should start without errors and wait for stdio input. Ctrl+C to stop.
 
 # Rebuild Docker image (agent-runner changes)
 docker build -t nanoclaw-agent:latest -f ~/nanoclaw/container/Dockerfile ~/nanoclaw/container/
 
 # Clear session cache
-rm -rf ~/nanoclaw/data/sessions/telegram_main/agent-runner-src
+rm -rf ~/nanoclaw/data/sessions/<your-group-folder>/agent-runner-src
 
 # Restart service
 systemctl --user restart nanoclaw
@@ -229,23 +230,23 @@ systemctl --user restart nanoclaw
 
 Test memory_search:
 ```
-Tom, busca en tu memoria todo lo relacionado con SpendWise
+@AssistantName, search your memory for everything related to [topic]
 ```
 
 Test memory_write:
 ```
-Tom, anota en el daily log que hoy implementamos búsqueda FTS5 en el sistema de memoria
+@AssistantName, add to the daily log that today we implemented FTS5 search in the memory system
 ```
 
 Test memory_get:
 ```
-Tom, lee las notas de ayer
+@AssistantName, read yesterday's notes
 ```
 
 Test pre-compaction flush:
 The flush triggers automatically when session size exceeds 75% of 200K tokens. To test manually, check the session size:
 ```bash
-du -sh ~/nanoclaw/data/sessions/telegram_main/.claude/
+du -sh ~/nanoclaw/data/sessions/<your-group-folder>/.claude/
 ```
 
 ## Troubleshooting

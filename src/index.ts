@@ -66,16 +66,16 @@ import { getMonthlyCostReport } from './cost-tracker.js';
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
 
-const MONTHLY_BUDGET_USD  = 25;
-const ALERT_WARN_PCT      = 0.80;
-const ALERT_CRITICAL_PCT  = 0.95;
+const MONTHLY_BUDGET_USD = 25;
+const ALERT_WARN_PCT = 0.8;
+const ALERT_CRITICAL_PCT = 0.95;
 
 // In-memory tracking to avoid spamming alerts (resets on process restart)
 const budgetAlertsToday = new Set<string>();
-let budgetAlertDate     = new Date().toISOString().slice(0, 10);
+let budgetAlertDate = new Date().toISOString().slice(0, 10);
 
 async function checkBudgetAlert(
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string) => Promise<void>,
 ): Promise<void> {
   const today = new Date().toISOString().slice(0, 10);
   if (today !== budgetAlertDate) {
@@ -87,26 +87,28 @@ async function checkBudgetAlert(
     const { default: Database } = await import('better-sqlite3');
     const { STORE_DIR } = await import('./config.js');
     const path = await import('path');
-    const db = new Database(path.join(STORE_DIR, 'messages.db'), { readonly: true });
+    const db = new Database(path.join(STORE_DIR, 'messages.db'), {
+      readonly: true,
+    });
     try {
       const report = getMonthlyCostReport(db);
-      const pct    = report.total_usd / MONTHLY_BUDGET_USD;
+      const pct = report.total_usd / MONTHLY_BUDGET_USD;
 
       if (pct >= ALERT_CRITICAL_PCT && !budgetAlertsToday.has('critical')) {
         budgetAlertsToday.add('critical');
         await sendMessage(
           `🚨 *ALERTA CRÍTICA — Presupuesto API*\n` +
-          `${(pct * 100).toFixed(0)}% consumido: ` +
-          `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}\n` +
-          `Quedan $${(MONTHLY_BUDGET_USD - report.total_usd).toFixed(2)}. ` +
-          `Considera reducir tareas programadas.`
+            `${(pct * 100).toFixed(0)}% consumido: ` +
+            `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}\n` +
+            `Quedan $${(MONTHLY_BUDGET_USD - report.total_usd).toFixed(2)}. ` +
+            `Considera reducir tareas programadas.`,
         );
       } else if (pct >= ALERT_WARN_PCT && !budgetAlertsToday.has('warning')) {
         budgetAlertsToday.add('warning');
         await sendMessage(
           `⚠️ *Aviso de presupuesto API*\n` +
-          `${(pct * 100).toFixed(0)}% consumido este mes: ` +
-          `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}`
+            `${(pct * 100).toFixed(0)}% consumido este mes: ` +
+            `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}`,
         );
       }
     } finally {
@@ -131,7 +133,9 @@ function shouldTriggerMemoryFlush(groupFolder: string): boolean {
   const sessionDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
   try {
     if (!fs.existsSync(sessionDir)) return false;
-    const files = fs.readdirSync(sessionDir).filter((f) => f.endsWith('.jsonl'));
+    const files = fs
+      .readdirSync(sessionDir)
+      .filter((f) => f.endsWith('.jsonl'));
     let totalBytes = 0;
     for (const f of files) {
       totalBytes += fs.statSync(path.join(sessionDir, f)).size;
@@ -305,7 +309,10 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
 
       // Pre-compaction memory flush: inject a save prompt when the session is
       // approaching the context limit, at most once per session per group.
-      if (!flushTriggered[group.folder] && shouldTriggerMemoryFlush(group.folder)) {
+      if (
+        !flushTriggered[group.folder] &&
+        shouldTriggerMemoryFlush(group.folder)
+      ) {
         flushTriggered[group.folder] = true;
         const flushPrompt =
           `[SISTEMA] Tu contexto de sesión está cerca del límite. Antes de continuar:\n` +

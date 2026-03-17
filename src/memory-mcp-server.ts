@@ -89,7 +89,9 @@ function getRelativePath(absPath: string): string {
   return path.relative(MEMORY_DIR, absPath);
 }
 
-function chunkFile(content: string): Array<{ lineStart: number; text: string }> {
+function chunkFile(
+  content: string,
+): Array<{ lineStart: number; text: string }> {
   const lines = content.split('\n');
   const CHUNK_SIZE = 10;
   const OVERLAP = 2;
@@ -170,7 +172,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object',
         properties: {
-          query: { type: 'string', description: 'Natural language search query' },
+          query: {
+            type: 'string',
+            description: 'Natural language search query',
+          },
           max_results: {
             type: 'number',
             description: 'Max results to return (default 5, max 20)',
@@ -271,7 +276,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
       // Fetch extra rows when date filtering so we can trim after
-      const fetchLimit = date_from || date_to ? Math.min(limit * 5, 100) : limit;
+      const fetchLimit =
+        date_from || date_to ? Math.min(limit * 5, 100) : limit;
       const rows = db
         .prepare(
           `SELECT file, line_start, content, rank
@@ -321,12 +327,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // ── memory_write ───────────────────────────────────────────────────────────
   if (name === 'memory_write') {
-    const {
-      target,
-      content,
-      section,
-      mode,
-    } = args as {
+    const { target, content, section, mode } = args as {
       target: 'daily' | 'long_term';
       content: string;
       section?: string;
@@ -376,11 +377,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           const before = lines.slice(0, sectionIdx + 1).join('\n');
           const after = lines.slice(endIdx).join('\n');
           const newContent =
-            before +
-            '\n\n' +
-            content +
-            '\n' +
-            (after ? '\n' + after : '');
+            before + '\n\n' + content + '\n' + (after ? '\n' + after : '');
           fs.writeFileSync(filePath, newContent.trimEnd() + '\n');
         }
       } else {
@@ -407,11 +404,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   // ── memory_get ─────────────────────────────────────────────────────────────
   if (name === 'memory_get') {
-    const {
-      file,
-      line_start,
-      line_end,
-    } = args as {
+    const { file, line_start, line_end } = args as {
       file: string;
       line_start?: number;
       line_end?: number;

@@ -158,7 +158,7 @@ Or paste the JSON content directly into `~/gcp-oauth.keys.json` on the server.
 ### Add GOOGLE_OAUTH_CREDENTIALS to .env
 
 ```bash
-echo "GOOGLE_OAUTH_CREDENTIALS=/home/jorge/gcp-oauth.keys.json" >> .env
+echo "GOOGLE_OAUTH_CREDENTIALS=~/gcp-oauth.keys.json" >> .env
 ```
 
 ### Add GOOGLE_OAUTH_CREDENTIALS to the systemd unit
@@ -173,7 +173,7 @@ Add or extend the `[Service]` block in the override file:
 
 ```ini
 [Service]
-Environment=GOOGLE_OAUTH_CREDENTIALS=/home/jorge/gcp-oauth.keys.json
+Environment=GOOGLE_OAUTH_CREDENTIALS=/home/<username>/gcp-oauth.keys.json
 ```
 
 Save and close the editor.
@@ -225,7 +225,7 @@ systemctl --user restart nanoclaw
 The agent-runner source is copied into per-group directories on first run. Delete the cache so the updated `index.ts` is picked up:
 
 ```bash
-rm -rf ~/nanoclaw/data/sessions/telegram_main/agent-runner-src
+rm -rf ~/nanoclaw/data/sessions/<your-group-folder>/agent-runner-src
 ```
 
 If other groups exist, clear all caches:
@@ -253,7 +253,7 @@ tail -f logs/nanoclaw.log
 Container logs for a specific group:
 
 ```bash
-tail -f groups/telegram_main/logs/container-*.log 2>/dev/null || ls -t groups/telegram_main/logs/ | head -3
+tail -f groups/<your-group-folder>/logs/container-*.log 2>/dev/null || ls -t groups/<your-group-folder>/logs/ | head -3
 ```
 
 ## Troubleshooting
@@ -292,7 +292,7 @@ The token store at `~/.config/google-calendar-mcp/tokens.json` will be updated i
 The agent-runner source cache was not cleared. Clear it:
 
 ```bash
-rm -rf ~/nanoclaw/data/sessions/telegram_main/agent-runner-src
+rm -rf ~/nanoclaw/data/sessions/<your-group-folder>/agent-runner-src
 ```
 
 ### Credentials not reaching the container

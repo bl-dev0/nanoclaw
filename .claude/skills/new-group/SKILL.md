@@ -18,7 +18,7 @@ Collect:
 - **Purpose / context** — what will this group be used for? What should the assistant know about it?
 
 AskUserQuestion: Should this be a main group (no trigger required) or a standard group (trigger word required)?
-- **Standard group** — responds only when @Tom is mentioned (Recommended for most groups)
+- **Standard group** — responds only when the trigger word is mentioned (e.g. `@AssistantName`) (Recommended for most groups)
 - **Main group** — responds to every message (only one main group should exist)
 
 ### Get the Telegram chat ID
@@ -51,7 +51,7 @@ npx tsx setup/index.ts --step register -- \
   --jid "tg:<chat-id>" \
   --name "<group-name>" \
   --folder "<folder-name>" \
-  --trigger "@Tom" \
+  --trigger "@<AssistantName>" \
   --channel telegram
 ```
 
@@ -63,7 +63,7 @@ npx tsx setup/index.ts --step register -- \
   --jid "tg:<chat-id>" \
   --name "<group-name>" \
   --folder "<folder-name>" \
-  --trigger "@Tom" \
+  --trigger "@<AssistantName>" \
   --channel telegram \
   --no-trigger-required \
   --is-main
@@ -75,19 +75,21 @@ Confirm the registration succeeded with no errors.
 
 Create `groups/<folder-name>/CLAUDE.md` tailored to the group's purpose. At minimum include:
 
-- The assistant's name (Tom)
+- The assistant's name and persona
 - The group's purpose and context
 - Any specific behavior, tone, or constraints relevant to this group
 - If the group has access to specific tools (GitHub, Calendar, etc.), document them
+
+Write the CLAUDE.md in the user's preferred language — agents read and respond in whatever language their CLAUDE.md is written in.
 
 Example structure:
 
 ```markdown
 # <Group Name>
 
-Eres Tom, [role description].
+You are <AssistantName>, [role description].
 
-## Contexto
+## Context
 
 [Purpose and relevant background for this group]
 
@@ -102,7 +104,7 @@ Use the information the user provided in Phase 1 to write a useful, specific CLA
 
 Tell the user:
 
-> **Important:** By default, Telegram bots only see @mentions and commands in groups — not all messages. Since this is a standard group using @Tom as trigger, this may already be fine. But if you want the bot to see all messages:
+> **Important:** By default, Telegram bots only see @mentions and commands in groups — not all messages. Since this is a standard group using a trigger word, this may already be fine. But if you want the bot to see all messages:
 >
 > 1. Open Telegram and search for `@BotFather`
 > 2. Send `/mybots` and select your bot
@@ -121,7 +123,7 @@ If no changes were made to the container configuration, no rebuild is needed —
 
 1. Confirm the bot is a member of the group
 2. Check the JID is correct: `sqlite3 store/messages.db "SELECT * FROM registered_groups WHERE folder = '<folder>'"`
-3. Verify the trigger: for standard groups, the message must contain `@Tom`
+3. Verify the trigger: for standard groups, the message must contain the registered trigger word
 4. Check Group Privacy is off if messages aren't being seen
 
 ### Wrong trigger word registered
@@ -132,7 +134,7 @@ Update the trigger directly in SQLite with a quick node script:
 // scripts/fix-trigger.mjs
 import Database from 'better-sqlite3';
 const db = new Database('store/messages.db');
-db.prepare("UPDATE registered_groups SET trigger_pattern = '@Tom' WHERE folder = '<folder>'").run();
+db.prepare("UPDATE registered_groups SET trigger_pattern = '@<AssistantName>' WHERE folder = '<folder>'").run();
 db.close();
 ```
 

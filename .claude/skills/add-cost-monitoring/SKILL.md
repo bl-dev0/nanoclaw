@@ -1,22 +1,22 @@
 # Skill: add-cost-monitoring
 
-Implementa un sistema de monitorización de costes de API para NanoClaw.
-Captura el usage (tokens) de cada respuesta del Agent SDK, lo persiste en SQLite,
-expone un MCP tool para que el agente informe de costes, y envía alertas automáticas
-por Telegram cuando se supera el 80% del presupuesto mensual.
+Implements an API cost monitoring system for NanoClaw.
+Captures token usage from each Agent SDK response, persists it in SQLite,
+exposes an MCP tool so the agent can report costs, and sends automatic alerts
+via Telegram when 80% of the monthly budget is exceeded.
 
 ---
 
-## Pasos de implementación
+## Implementation steps
 
-Ejecuta los siguientes pasos en orden. No saltes ninguno. Antes de modificar
-cualquier archivo existente, léelo completo para entender su estructura actual.
+Execute the following steps in order. Do not skip any. Before modifying
+any existing file, read it completely to understand its current structure.
 
 ---
 
-### Paso 1 — Crear la tabla SQLite `api_usage`
+### Step 1 — Create the `api_usage` SQLite table
 
-Ejecuta este comando bash para añadir la tabla a la base de datos existente:
+Run this bash command to add the table to the existing database:
 
 ```bash
 sqlite3 ~/nanoclaw/store/messages.db << 'EOF'
@@ -37,7 +37,7 @@ CREATE INDEX IF NOT EXISTS idx_api_usage_group     ON api_usage(group_jid);
 EOF
 ```
 
-Verifica que la tabla existe:
+Verify the table exists:
 
 ```bash
 sqlite3 ~/nanoclaw/store/messages.db ".tables" | grep api_usage
@@ -45,15 +45,15 @@ sqlite3 ~/nanoclaw/store/messages.db ".tables" | grep api_usage
 
 ---
 
-### Paso 2 — Crear `src/cost-tracker.ts`
+### Step 2 — Create `src/cost-tracker.ts`
 
-Crea el archivo `src/cost-tracker.ts` con el siguiente contenido exacto:
+Create the file `src/cost-tracker.ts` with the following exact content:
 
 ```typescript
 import Database from 'better-sqlite3';
 
-// ─── Precios por token (USD por token individual, no por millón) ───────────
-// Fuente: https://anthropic.com/pricing — actualizar si cambian
+// ─── Per-token pricing (USD per individual token, not per million) ──────────
+// Source: https://anthropic.com/pricing — update if prices change
 const PRICING: Record<string, {
   input: number; output: number; cacheWrite: number; cacheRead: number;
 }> = {
@@ -79,7 +79,7 @@ const PRICING: Record<string, {
 
 const DEFAULT_PRICING = PRICING['claude-sonnet-4-20250514'];
 
-// ─── Tipos ─────────────────────────────────────────────────────────────────
+// ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface UsageData {
   input_tokens: number;
@@ -88,7 +88,7 @@ export interface UsageData {
   cache_read_input_tokens?: number;
 }
 
-// ─── Cálculo de coste ──────────────────────────────────────────────────────
+// ─── Cost calculation ───────────────────────────────────────────────────────
 
 export function calculateCost(model: string, usage: UsageData): number {
   const p = PRICING[model] ?? DEFAULT_PRICING;
@@ -100,7 +100,7 @@ export function calculateCost(model: string, usage: UsageData): number {
   );
 }
 
-// ─── Escritura ─────────────────────────────────────────────────────────────
+// ─── Write ──────────────────────────────────────────────────────────────────
 
 export function logUsage(
   db: Database.Database,
@@ -129,7 +129,7 @@ export function logUsage(
   );
 }
 
-// ─── Consultas ─────────────────────────────────────────────────────────────
+// ─── Queries ─────────────────────────────────────────────────────────────────
 
 export function getMonthlyCostReport(db: Database.Database) {
   const monthStart = new Date();
@@ -192,16 +192,16 @@ export function getProjectedMonthlyCost(db: Database.Database): number {
 
 ---
 
-### Paso 3 — Crear `src/cost-mcp-server.ts`
+### Step 3 — Create `src/cost-mcp-server.ts`
 
-Crea el archivo `src/cost-mcp-server.ts`:
+Create the file `src/cost-mcp-server.ts`:
 
 ```typescript
 #!/usr/bin/env node
 /**
- * MCP server para monitorización de costes de API.
- * Corre en el host, se comunica con el contenedor via stdio.
- * Expone una herramienta: get_cost_report
+ * MCP server for API cost monitoring.
+ * Runs on the host, communicates with the container via stdio.
+ * Exposes one tool: get_cost_report
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -259,21 +259,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const lines: string[] = [];
 
     if (budgetPct >= 95) {
-      lines.push(`🚨 ALERTA CRÍTICA: ${budgetPct.toFixed(0)}% del presupuesto consumido`);
+      lines.push(`🚨 CRITICAL ALERT: ${budgetPct.toFixed(0)}% of budget consumed`);
     } else if (budgetPct >= 80) {
-      lines.push(`⚠️ AVISO: ${budgetPct.toFixed(0)}% del presupuesto consumido`);
+      lines.push(`⚠️ WARNING: ${budgetPct.toFixed(0)}% of budget consumed`);
     }
 
-    lines.push(`📊 Coste API — ${month}`);
+    lines.push(`📊 API Cost — ${month}`);
     lines.push(``);
-    lines.push(`Total mes:   $${report.total_usd.toFixed(3)} / $${MONTHLY_BUDGET}  (${budgetPct.toFixed(1)}%)`);
-    lines.push(`Restante:    $${remaining.toFixed(3)}`);
-    lines.push(`Hoy:         $${today.toFixed(4)}`);
-    lines.push(`Proyección:  $${projected.toFixed(2)}/mes (basada en últimos 7 días)`);
+    lines.push(`Month total: $${report.total_usd.toFixed(3)} / $${MONTHLY_BUDGET}  (${budgetPct.toFixed(1)}%)`);
+    lines.push(`Remaining:   $${remaining.toFixed(3)}`);
+    lines.push(`Today:       $${today.toFixed(4)}`);
+    lines.push(`Projected:   $${projected.toFixed(2)}/mo (based on last 7 days)`);
     lines.push(``);
 
     if (report.by_group.length > 0) {
-      lines.push(`Por grupo:`);
+      lines.push(`By group:`);
       for (const g of report.by_group) {
         lines.push(`  • ${g.group_jid}: $${g.cost.toFixed(4)}  (${g.messages} msgs)`);
       }
@@ -281,10 +281,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     const t = report.token_breakdown;
-    lines.push(`Tokens este mes:`);
+    lines.push(`Tokens this month:`);
     lines.push(`  Input:       ${fmt(t.input)}K`);
     lines.push(`  Output:      ${fmt(t.output)}K`);
-    lines.push(`  Cache read:  ${fmt(t.cache_read)}K  (90% descuento)`);
+    lines.push(`  Cache read:  ${fmt(t.cache_read)}K  (90% discount)`);
     lines.push(`  Cache write: ${fmt(t.cache_write)}K`);
 
     return {
@@ -305,76 +305,75 @@ await server.connect(transport);
 
 ---
 
-### Paso 4 — Hook de logging en `container-runner.ts`
+### Step 4 — Logging hook in `container-runner.ts`
 
-Lee `src/container-runner.ts` completo. Localiza el lugar donde se procesan
-las respuestas del Agent SDK buscando:
-- La función que ejecuta el agente (puede llamarse `runAgent`, `runContainer`,
-  `executeAgent`, o similar)
-- El loop `for await` que itera sobre eventos del SDK
-- Cualquier referencia a `type: 'message'`, `usage`, `input_tokens`, o
-  `output_tokens` en el flujo de respuesta
+Read `src/container-runner.ts` completely. Locate where Agent SDK responses
+are processed by looking for:
+- The function that runs the agent (may be called `runAgent`, `runContainer`,
+  `executeAgent`, or similar)
+- The `for await` loop iterating over SDK events
+- Any reference to `type: 'message'`, `usage`, `input_tokens`, or
+  `output_tokens` in the response flow
 
-Una vez localizado, añade la importación al inicio del archivo:
+Once located, add the import at the top of the file:
 
 ```typescript
 import { logUsage } from './cost-tracker.js';
 ```
 
-Y dentro del loop de eventos, añade el hook donde aparezcan los datos de usage.
-El patrón exacto depende de la versión del SDK. Busca uno de estos patrones:
+And inside the event loop, add the hook where usage data appears.
+The exact pattern depends on the SDK version. Look for one of these:
 
-**Patrón A** — eventos de tipo `message`:
+**Pattern A** — `message` type events:
 ```typescript
 if (event.type === 'message' && event.message?.usage) {
   logUsage(db, groupJid, event.message.model ?? 'claude-sonnet-4-20250514', event.message.usage);
 }
 ```
 
-**Patrón B** — resultado final con usage:
+**Pattern B** — final result with usage:
 ```typescript
 if (result?.usage) {
   logUsage(db, groupJid, result.model ?? 'claude-sonnet-4-20250514', result.usage);
 }
 ```
 
-**Patrón C** — si el SDK devuelve un stream con `finalMessage`:
+**Pattern C** — stream with `finalMessage`:
 ```typescript
 if (stream.finalMessage?.usage) {
   logUsage(db, groupJid, stream.finalMessage.model ?? 'claude-sonnet-4-20250514', stream.finalMessage.usage);
 }
 ```
 
-Usa el patrón que encaje con la estructura real del código. Si hay más de un
-punto donde se recibe usage (por ejemplo, en mensajes intermedios y en el
-mensaje final), usa **solo el mensaje final** para evitar doble conteo.
+Use whichever pattern matches the actual code structure. If usage data appears
+at multiple points (e.g., intermediate messages and the final message), use
+**only the final message** to avoid double-counting.
 
-Asegúrate de que la variable `db` (instancia de better-sqlite3) está disponible
-en el scope donde añades el hook. Si no lo está, pásala como parámetro o
-ábrela localmente.
+Make sure the `db` variable (better-sqlite3 instance) is in scope where you
+add the hook. If not, pass it as a parameter or open it locally.
 
 ---
 
-### Paso 5 — Modificar `container/agent-runner/src/index.ts`
+### Step 5 — Modify `container/agent-runner/src/index.ts`
 
-Lee el archivo completo. Localiza:
-1. El objeto `mcpServers` (donde están registrados github, google-calendar, etc.)
-2. El array `allowedTools` (donde están los patrones `mcp__github__*`, etc.)
+Read the full file. Locate:
+1. The `mcpServers` object (where github, google-calendar, etc. are registered)
+2. The `allowedTools` array (where `mcp__github__*` patterns are listed)
 
-Añade al objeto `mcpServers`:
+Add to the `mcpServers` object:
 
 ```typescript
 'cost-monitoring': {
   command: 'node',
-  args: ['/home/jorge/nanoclaw/dist/cost-mcp-server.js'],
+  args: [`${process.env.HOME}/nanoclaw/dist/cost-mcp-server.js`],
   env: {
-    DB_PATH: '/home/jorge/nanoclaw/store/messages.db',
-    MONTHLY_BUDGET_USD: '25',
+    DB_PATH: `${process.env.HOME}/nanoclaw/store/messages.db`,
+    MONTHLY_BUDGET_USD: process.env.MONTHLY_BUDGET_USD ?? '25',
   },
 },
 ```
 
-Añade al array `allowedTools`:
+Add to the `allowedTools` array:
 
 ```typescript
 'mcp__cost-monitoring__get_cost_report',
@@ -382,28 +381,27 @@ Añade al array `allowedTools`:
 
 ---
 
-### Paso 6 — Lógica de alertas en `src/index.ts`
+### Step 6 — Alert logic in `src/index.ts`
 
-Lee `src/index.ts` completo. Localiza:
-- La función o el punto donde NanoClaw envía mensajes proactivos al chat
-  principal (la misma función que usan las tareas programadas para enviar
-  notificaciones)
-- El loop principal de procesamiento de mensajes
+Read `src/index.ts` completely. Locate:
+- The function or point where NanoClaw sends proactive messages to the main chat
+  (the same function that scheduled tasks use to send notifications)
+- The main message processing loop
 
-Añade la importación al inicio:
+Add the import at the top:
 
 ```typescript
 import { getMonthlyCostReport } from './cost-tracker.js';
 ```
 
-Añade esta función en el módulo (fuera del loop principal):
+Add this function in the module (outside the main loop):
 
 ```typescript
 const MONTHLY_BUDGET_USD  = 25;
 const ALERT_WARN_PCT      = 0.80;
 const ALERT_CRITICAL_PCT  = 0.95;
 
-// Tracking en memoria para no spamear (se resetea al reiniciar el proceso)
+// In-memory tracking to avoid spamming (resets on process restart)
 const budgetAlertsToday = new Set<string>();
 let budgetAlertDate     = new Date().toISOString().slice(0, 10);
 
@@ -411,7 +409,7 @@ async function checkBudgetAlert(
   db: Database.Database,
   sendMessage: (text: string) => Promise<void>
 ): Promise<void> {
-  // Resetear flags si cambió el día
+  // Reset flags if the day changed
   const today = new Date().toISOString().slice(0, 10);
   if (today !== budgetAlertDate) {
     budgetAlertsToday.clear();
@@ -424,52 +422,50 @@ async function checkBudgetAlert(
   if (pct >= ALERT_CRITICAL_PCT && !budgetAlertsToday.has('critical')) {
     budgetAlertsToday.add('critical');
     await sendMessage(
-      `🚨 *ALERTA CRÍTICA — Presupuesto API*\n` +
-      `${(pct * 100).toFixed(0)}% consumido: ` +
-      `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}\n` +
-      `Quedan $${(MONTHLY_BUDGET_USD - report.total_usd).toFixed(2)}. ` +
-      `Considera reducir tareas programadas.`
+      `🚨 *CRITICAL ALERT — API Budget*\n` +
+      `${(pct * 100).toFixed(0)}% consumed: ` +
+      `$${report.total_usd.toFixed(2)} of $${MONTHLY_BUDGET_USD}\n` +
+      `$${(MONTHLY_BUDGET_USD - report.total_usd).toFixed(2)} remaining. ` +
+      `Consider reducing scheduled tasks.`
     );
   } else if (pct >= ALERT_WARN_PCT && !budgetAlertsToday.has('warning')) {
     budgetAlertsToday.add('warning');
     await sendMessage(
-      `⚠️ *Aviso de presupuesto API*\n` +
-      `${(pct * 100).toFixed(0)}% consumido este mes: ` +
-      `$${report.total_usd.toFixed(2)} de $${MONTHLY_BUDGET_USD}`
+      `⚠️ *API Budget Warning*\n` +
+      `${(pct * 100).toFixed(0)}% consumed this month: ` +
+      `$${report.total_usd.toFixed(2)} of $${MONTHLY_BUDGET_USD}`
     );
   }
 }
 ```
 
-Llama a `checkBudgetAlert(db, sendToMain)` **después de cada respuesta del
-agente** que haya registrado usage. Usa la misma función `sendToMain` (o
-equivalente) que usan las tareas programadas para enviar mensajes proactivos
-al chat principal de Telegram.
+Call `checkBudgetAlert(db, sendToMain)` **after each agent response** that
+logged usage. Use the same `sendToMain` function (or equivalent) that
+scheduled tasks use to send proactive messages to the main Telegram chat.
 
 ---
 
-### Paso 7 — Compilar TypeScript
+### Step 7 — Compile TypeScript
 
 ```bash
 cd ~/nanoclaw
 npm run build
 ```
 
-Si el comando falla, intenta:
+If the command fails, try:
 
 ```bash
-npx tsc --noEmit  # Solo verificar errores de tipos
-npx tsc           # Compilar
+npx tsc --noEmit  # Type-check only
+npx tsc           # Compile
 ```
 
-Corrige cualquier error de tipos antes de continuar. Los errores más probables son:
-- `db` no disponible en el scope del hook → pásala como parámetro
-- Tipos de `usage` no reconocidos → añade `as any` temporalmente si el SDK
-  no exporta el tipo
+Fix any type errors before continuing. Most likely errors:
+- `db` not in scope at the hook location → pass it as a parameter
+- `usage` type not recognized → add `as any` temporarily if the SDK doesn't export the type
 
 ---
 
-### Paso 8 — Reconstruir imagen Docker
+### Step 8 — Rebuild Docker image
 
 ```bash
 docker build -t nanoclaw-agent:latest \
@@ -477,17 +473,17 @@ docker build -t nanoclaw-agent:latest \
   ~/nanoclaw/container/
 ```
 
-Espera a que termine sin errores.
+Wait for it to complete without errors.
 
 ---
 
-### Paso 9 — Limpiar caché y reiniciar
+### Step 9 — Clear cache and restart
 
 ```bash
-# Borrar caché de sesiones para forzar recreación del contenedor
+# Clear session cache to force container recreation
 rm -rf ~/nanoclaw/data/sessions/*/agent-runner-src
 
-# Reiniciar el servicio
+# Restart the service
 systemctl --user restart nanoclaw
 sleep 3
 systemctl --user status nanoclaw
@@ -495,61 +491,62 @@ systemctl --user status nanoclaw
 
 ---
 
-### Paso 10 — Verificación
+### Step 10 — Verification
 
-**10.1 Verificar tabla vacía (es correcto al inicio):**
+**10.1 Verify empty table (expected at start):**
 ```bash
 sqlite3 ~/nanoclaw/store/messages.db \
   "SELECT COUNT(*) FROM api_usage;"
-# Debe retornar: 0
+# Should return: 0
 ```
 
-**10.2 Enviar un mensaje de prueba desde Telegram y verificar registro:**
+**10.2 Send a test message from Telegram and verify logging:**
 ```bash
-# Esperar 10 segundos tras el mensaje, luego:
+# Wait 10 seconds after the message, then:
 sqlite3 ~/nanoclaw/store/messages.db \
   "SELECT timestamp, group_jid, model, input_tokens, output_tokens,
           ROUND(estimated_cost_usd, 6) as cost_usd
    FROM api_usage ORDER BY id DESC LIMIT 3;"
 ```
 
-Si la tabla sigue vacía tras el mensaje, el hook en `container-runner.ts`
-no está capturando el usage. Revisa el Paso 4 — el punto de captura puede
-estar en una ubicación diferente del código. Usa:
+If the table is still empty after the message, the hook in `container-runner.ts`
+is not capturing usage. Revisit Step 4 — the capture point may be elsewhere
+in the code. Use:
 ```bash
 grep -rn "usage\|input_tokens\|output_tokens" ~/nanoclaw/src/ --include="*.ts" \
   | grep -v "cost-tracker\|cost-mcp"
 ```
-para localizar dónde el código existente ya procesa el usage del SDK.
+to locate where the existing code already processes SDK usage data.
 
-**10.3 Verificar MCP tool desde Telegram:**
+**10.3 Verify MCP tool from Telegram:**
 ```
-Tom, ¿cuánto he gastado este mes en API?
+@AssistantName, how much have I spent on the API this month?
 ```
-Tom debe invocar `get_cost_report` y responder con el breakdown.
+The agent should invoke `get_cost_report` and respond with the breakdown.
 
 ---
 
-## Resumen de archivos modificados
+## Summary of modified files
 
-| Archivo | Tipo de cambio |
+| File | Change type |
 |---|---|
-| `store/messages.db` | Nueva tabla `api_usage` + índices |
-| `src/cost-tracker.ts` | **Nuevo** — cálculo y consultas |
-| `src/cost-mcp-server.ts` | **Nuevo** — MCP tool `get_cost_report` |
-| `src/container-runner.ts` | Añadir import + hook de logging |
-| `container/agent-runner/src/index.ts` | Añadir MCP server + allowedTool |
-| `src/index.ts` | Añadir import + función `checkBudgetAlert` |
+| `store/messages.db` | New `api_usage` table + indexes |
+| `src/cost-tracker.ts` | **New** — cost calculation and queries |
+| `src/cost-mcp-server.ts` | **New** — MCP tool `get_cost_report` |
+| `src/container-runner.ts` | Add import + logging hook |
+| `container/agent-runner/src/index.ts` | Add MCP server + allowedTool |
+| `src/index.ts` | Add import + `checkBudgetAlert` function |
 
 ---
 
-## Notas importantes
+## Important notes
 
-- El MCP server (`cost-mcp-server.ts`) corre en el **host**, no dentro del
-  contenedor Docker. Se comunica via stdio igual que los otros MCP servers.
-- La tabla `api_usage` usa la misma base de datos `store/messages.db` que
-  el resto de NanoClaw — no se necesita una nueva base de datos.
-- El budget de $25 está hardcodeado en dos sitios: la env var del MCP server
-  (Paso 5) y la constante en `src/index.ts` (Paso 6). Mantenlos sincronizados.
-- Si `better-sqlite3` no está disponible en el host (solo en el contenedor),
-  instálalo: `npm install better-sqlite3 @types/better-sqlite3`
+- The MCP server (`cost-mcp-server.ts`) runs on the **host**, not inside the
+  Docker container. It communicates via stdio just like the other MCP servers.
+- The `api_usage` table uses the same `store/messages.db` database as the
+  rest of NanoClaw — no new database needed.
+- The monthly budget defaults to $25. Set `MONTHLY_BUDGET_USD` in your `.env`
+  and systemd unit override to use a different value. Keep the MCP server env var (Step 5)
+  and the constant in `src/index.ts` (Step 6) in sync.
+- If `better-sqlite3` is not available on the host (only in the container),
+  install it: `npm install better-sqlite3 @types/better-sqlite3`
