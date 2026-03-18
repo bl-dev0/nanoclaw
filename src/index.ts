@@ -378,52 +378,61 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   let hadError = false;
   let outputSentToUser = false;
   let lastUsage: import('./cost-tracker.js').UsageData | undefined;
-  const output = await runAgent(group, prompt, chatJid, imageAttachments, async (result) => {
-    // Streaming output callback — called for each agent result
-    if (result.result) {
-      const raw =
-        typeof result.result === 'string'
-          ? result.result
-          : JSON.stringify(result.result);
-      // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
-      const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
-      logger.info({ group: group.name }, `Agent output: ${raw.slice(0, 200)}`);
-      if (text) {
-        await channel.sendMessage(chatJid, text);
-        outputSentToUser = true;
-      }
-      // Only reset idle timer on actual results, not session-update markers (result: null)
-      resetIdleTimer();
-      if (result.usage) lastUsage = result.usage;
-
-      // Pre-compaction memory flush: inject a save prompt when the session is
-      // approaching the context limit, at most once per session per group.
-      if (
-        !flushTriggered[group.folder] &&
-        shouldTriggerMemoryFlush(group.folder)
-      ) {
-        flushTriggered[group.folder] = true;
-        const flushPrompt =
-          `[SISTEMA] Tu contexto de sesión está cerca del límite. Antes de continuar:\n` +
-          `1. Revisa la conversación actual y guarda un resumen en el daily log usando memory_write(target="daily")\n` +
-          `2. Si hay decisiones o preferencias nuevas, guárdalas en memoria de largo plazo usando memory_write(target="long_term")\n` +
-          `3. Después de guardar, confirma con "Memoria sincronizada" y continúa normalmente`;
-        const sent = queue.sendMessage(chatJid, flushPrompt);
+  const output = await runAgent(
+    group,
+    prompt,
+    chatJid,
+    imageAttachments,
+    async (result) => {
+      // Streaming output callback — called for each agent result
+      if (result.result) {
+        const raw =
+          typeof result.result === 'string'
+            ? result.result
+            : JSON.stringify(result.result);
+        // Strip <internal>...</internal> blocks — agent uses these for internal reasoning
+        const text = raw.replace(/<internal>[\s\S]*?<\/internal>/g, '').trim();
         logger.info(
-          { group: group.name, sent },
-          'Pre-compaction memory flush injected',
+          { group: group.name },
+          `Agent output: ${raw.slice(0, 200)}`,
         );
+        if (text) {
+          await channel.sendMessage(chatJid, text);
+          outputSentToUser = true;
+        }
+        // Only reset idle timer on actual results, not session-update markers (result: null)
+        resetIdleTimer();
+        if (result.usage) lastUsage = result.usage;
+
+        // Pre-compaction memory flush: inject a save prompt when the session is
+        // approaching the context limit, at most once per session per group.
+        if (
+          !flushTriggered[group.folder] &&
+          shouldTriggerMemoryFlush(group.folder)
+        ) {
+          flushTriggered[group.folder] = true;
+          const flushPrompt =
+            `[SISTEMA] Tu contexto de sesión está cerca del límite. Antes de continuar:\n` +
+            `1. Revisa la conversación actual y guarda un resumen en el daily log usando memory_write(target="daily")\n` +
+            `2. Si hay decisiones o preferencias nuevas, guárdalas en memoria de largo plazo usando memory_write(target="long_term")\n` +
+            `3. Después de guardar, confirma con "Memoria sincronizada" y continúa normalmente`;
+          const sent = queue.sendMessage(chatJid, flushPrompt);
+          logger.info(
+            { group: group.name, sent },
+            'Pre-compaction memory flush injected',
+          );
+        }
       }
-    }
 
-    if (result.status === 'success') {
-      queue.notifyIdle(chatJid);
-    }
+      if (result.status === 'success') {
+        queue.notifyIdle(chatJid);
+      }
 
-    if (result.status === 'error') {
-      hadError = true;
-    }
-  });
+      if (result.status === 'error') {
+        hadError = true;
+      }
+    },
+  );
 
   await channel.setTyping?.(chatJid, false);
   if (idleTimer) clearTimeout(idleTimer);

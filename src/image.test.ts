@@ -25,11 +25,19 @@ describe('image processing', () => {
   describe('processImage', () => {
     it('resizes and saves image, returns content string', async () => {
       const buffer = Buffer.from('raw-image-data');
-      const result = await processImage(buffer, '/tmp/groups/test', 'Check this out');
+      const result = await processImage(
+        buffer,
+        '/tmp/groups/test',
+        'Check this out',
+      );
 
       expect(result).not.toBeNull();
-      expect(result!.content).toMatch(/^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg\] Check this out$/);
-      expect(result!.relativePath).toMatch(/^attachments\/img-\d+-[a-z0-9]+\.jpg$/);
+      expect(result!.content).toMatch(
+        /^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg\] Check this out$/,
+      );
+      expect(result!.relativePath).toMatch(
+        /^attachments\/img-\d+-[a-z0-9]+\.jpg$/,
+      );
       expect(fs.mkdirSync).toHaveBeenCalled();
       expect(fs.writeFileSync).toHaveBeenCalled();
     });
@@ -39,11 +47,17 @@ describe('image processing', () => {
       const result = await processImage(buffer, '/tmp/groups/test', '');
 
       expect(result).not.toBeNull();
-      expect(result!.content).toMatch(/^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg\]$/);
+      expect(result!.content).toMatch(
+        /^\[Image: attachments\/img-\d+-[a-z0-9]+\.jpg\]$/,
+      );
     });
 
     it('returns null on empty buffer', async () => {
-      const result = await processImage(Buffer.alloc(0), '/tmp/groups/test', '');
+      const result = await processImage(
+        Buffer.alloc(0),
+        '/tmp/groups/test',
+        '',
+      );
 
       expect(result).toBeNull();
     });

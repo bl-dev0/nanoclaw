@@ -229,7 +229,10 @@ export class WhatsAppChannel implements Channel {
                 msg,
                 'buffer',
                 {},
-                { logger: console as any, reuploadRequest: this.sock.updateMediaMessage },
+                {
+                  logger: console as any,
+                  reuploadRequest: this.sock.updateMediaMessage,
+                },
               )) as Buffer;
               const transcript = await transcribeAudioBuffer(buffer);
               if (transcript) {
