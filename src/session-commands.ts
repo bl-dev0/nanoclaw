@@ -114,7 +114,9 @@ async function handleModelCommand(
     }
     case 'clear': {
       if (!deps.currentModel()) {
-        await deps.sendMessage('Model is already using the default. No change.');
+        await deps.sendMessage(
+          'Model is already using the default. No change.',
+        );
         return;
       }
       await deps.updateGroupModel(undefined);
@@ -174,7 +176,14 @@ export async function handleSessionCommand(opts: {
 
   if (!command || !cmdMsg) return { handled: false };
 
-  if (!isSessionCommandAllowed(isMainGroup, cmdMsg.is_from_me === true, cmdMsg.sender, ownerTelegramId)) {
+  if (
+    !isSessionCommandAllowed(
+      isMainGroup,
+      cmdMsg.is_from_me === true,
+      cmdMsg.sender,
+      ownerTelegramId,
+    )
+  ) {
     // DENIED: send denial if the sender would normally be allowed to interact,
     // then silently consume the command by advancing the cursor past it.
     // Trade-off: other messages in the same batch are also consumed (cursor is
