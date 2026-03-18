@@ -80,3 +80,8 @@ export const TIMEZONE =
 // Set OWNER_TELEGRAM_ID in .env to enable cross-group admin commands.
 export const OWNER_TELEGRAM_ID: string | undefined =
   process.env.OWNER_TELEGRAM_ID || envConfig.OWNER_TELEGRAM_ID || undefined;
+
+export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
+  .split(',')
+  .map((t) => t.trim())
+  .filter(Boolean);
