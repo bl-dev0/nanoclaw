@@ -21,6 +21,11 @@ AskUserQuestion: Should this be a main group (no trigger required) or a standard
 - **Standard group** — responds only when the trigger word is mentioned (e.g. `@AssistantName`) (Recommended for most groups)
 - **Main group** — responds to every message (only one main group should exist)
 
+AskUserQuestion: Which Claude model should this group use?
+- **Sonnet** (`claude-sonnet-4-6`) — balanced, fast, recommended for most groups (Recommended)
+- **Haiku** (`claude-haiku-4-5-20251001`) — fastest and cheapest, good for lightweight tasks
+- **Opus** (`claude-opus-4-6`) — most capable, best for complex reasoning and architecture decisions
+
 ### Get the Telegram chat ID
 
 If the user doesn't have the chat ID yet, tell them:
@@ -70,6 +75,51 @@ npx tsx setup/index.ts --step register -- \
 ```
 
 Confirm the registration succeeded with no errors.
+
+### Set model override (if not Sonnet)
+
+If the user chose Haiku or Opus, apply the model override now. First verify the feature is applied:
+
+```bash
+grep -n "AGENT_MODEL" src/container-runner.ts 2>/dev/null && echo "Applied" || echo "Not applied — run /set-group-model first"
+```
+
+If applied, run:
+
+```bash
+node -e "
+const Database = require('better-sqlite3');
+const db = new Database(process.env.HOME + '/nanoclaw/store/messages.db');
+const row = db.prepare('SELECT container_config FROM registered_groups WHERE folder = ?').get('<folder>');
+const cfg = row?.container_config ? JSON.parse(row.container_config) : {};
+cfg.model = '<model-id>';
+db.prepare('UPDATE registered_groups SET container_config = ? WHERE folder = ?').run(JSON.stringify(cfg), '<folder>');
+db.close();
+console.log('Done:', JSON.stringify(cfg));
+"
+```
+
+Model IDs: `claude-haiku-4-5-20251001` · `claude-sonnet-4-6` · `claude-opus-4-6`
+
+If the feature is not yet applied, tell the user to run `/set-group-model` first — it installs the required code changes.
+
+If the user chose Sonnet (the SDK default), skip this step — no override needed.
+
+### Restart the service
+
+The service loads registered groups **only at startup** — new groups written to SQLite are not picked up until restart:
+
+```bash
+systemctl --user restart nanoclaw
+```
+
+On macOS (launchd):
+```bash
+launchctl unload ~/Library/LaunchAgents/com.nanoclaw.plist
+launchctl load ~/Library/LaunchAgents/com.nanoclaw.plist
+```
+
+Confirm the service is running before continuing.
 
 ## Phase 3: Create Group CLAUDE.md
 
