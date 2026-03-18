@@ -6,7 +6,7 @@ import { readEnvFile } from './env.js';
 // Read config values from .env (falls back to process.env).
 // Secrets (API keys, tokens) are NOT read here — they are loaded only
 // by the credential proxy (credential-proxy.ts), never exposed to containers.
-const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER']);
+const envConfig = readEnvFile(['ASSISTANT_NAME', 'ASSISTANT_HAS_OWN_NUMBER', 'OWNER_TELEGRAM_ID']);
 
 export const ASSISTANT_NAME =
   process.env.ASSISTANT_NAME || envConfig.ASSISTANT_NAME || 'Andy';
@@ -71,3 +71,8 @@ export const TRIGGER_PATTERN = new RegExp(
 // Uses system timezone by default
 export const TIMEZONE =
   process.env.TZ || Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+// Optional: Telegram user ID that can run session commands (/model, /compact) in any group.
+// Set OWNER_TELEGRAM_ID in .env to enable cross-group admin commands.
+export const OWNER_TELEGRAM_ID: string | undefined =
+  process.env.OWNER_TELEGRAM_ID || envConfig.OWNER_TELEGRAM_ID || undefined;

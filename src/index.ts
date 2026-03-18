@@ -6,6 +6,7 @@ import {
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
   IDLE_TIMEOUT,
+  OWNER_TELEGRAM_ID,
   POLL_INTERVAL,
   TIMEZONE,
   TRIGGER_PATTERN,
@@ -264,6 +265,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     groupName: group.name,
     triggerPattern: TRIGGER_PATTERN,
     timezone: TIMEZONE,
+    ownerTelegramId: OWNER_TELEGRAM_ID,
     deps: {
       sendMessage: (text) => channel.sendMessage(chatJid, text),
       setTyping: (typing) =>
@@ -287,6 +289,41 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
               isTriggerAllowed(chatJid, msg.sender, loadSenderAllowlist())))
         );
       },
+      updateGroupModel: async (model: string | undefined) => {
+        const newConfig = { ...(group.containerConfig ?? {}), model };
+        const hasOtherFields =
+          newConfig.timeout != null ||
+          (newConfig.additionalMounts?.length ?? 0) > 0;
+        const updatedConfig =
+          model != null || hasOtherFields ? newConfig : undefined;
+        const updated: RegisteredGroup = {
+          ...group,
+          containerConfig: updatedConfig,
+        };
+        registeredGroups[chatJid] = updated;
+        setRegisteredGroup(chatJid, updated);
+      },
+      clearSessionCache: () => {
+        const cacheDir = path.join(
+          DATA_DIR,
+          'sessions',
+          group.folder,
+          'agent-runner-src',
+        );
+        try {
+          fs.rmSync(cacheDir, { recursive: true, force: true });
+          logger.info(
+            { group: group.name, cacheDir },
+            'Session cache cleared for model change',
+          );
+        } catch (err) {
+          logger.warn(
+            { group: group.name, err },
+            'Failed to clear session cache',
+          );
+        }
+      },
+      currentModel: () => group.containerConfig?.model,
     },
   });
   if (cmdResult.handled) return cmdResult.success;
@@ -579,6 +616,8 @@ async function startMessageLoop(): Promise<void> {
               isSessionCommandAllowed(
                 isMainGroup,
                 loopCmdMsg.is_from_me === true,
+                loopCmdMsg.sender,
+                OWNER_TELEGRAM_ID,
               )
             ) {
               queue.closeStdin(chatJid);

@@ -85,6 +85,9 @@ function makeDeps(
     advanceCursor: vi.fn(),
     formatMessages: vi.fn().mockReturnValue('<formatted>'),
     canSenderInteract: vi.fn().mockReturnValue(true),
+    updateGroupModel: vi.fn().mockResolvedValue(undefined),
+    clearSessionCache: vi.fn(),
+    currentModel: vi.fn().mockReturnValue(undefined),
     ...overrides,
   };
 }
