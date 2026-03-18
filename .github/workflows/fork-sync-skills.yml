@@ -25,10 +25,16 @@ jobs:
     if: github.repository != 'qwibitai/nanoclaw'
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/create-github-app-token@v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -55,7 +61,7 @@ jobs:
           fi
 
           # Merge upstream main into fork's main
-          if ! git merge upstream/main --no-edit -X theirs -- repo-tokens/; then
+          if ! git merge upstream/main --no-edit; then
             echo "::error::Failed to merge upstream/main into fork main — conflicts detected"
             git merge --abort
             echo "synced=false" >> "$GITHUB_OUTPUT"
