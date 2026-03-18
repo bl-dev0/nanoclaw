@@ -72,6 +72,7 @@ const ALERT_CRITICAL_PCT = 0.95;
 
 // In-memory tracking to avoid spamming alerts (resets on process restart)
 const budgetAlertsToday = new Set<string>();
+
 let budgetAlertDate = new Date().toISOString().slice(0, 10);
 
 async function checkBudgetAlert(
@@ -289,7 +290,6 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
-
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {

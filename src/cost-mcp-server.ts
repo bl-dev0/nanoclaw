@@ -319,8 +319,12 @@ server.setRequestHandler(
           `Run the following to identify large context files contributing to token costs:`,
         );
         lines.push(``);
-        lines.push(`# Size of main CLAUDE.md (system prompt sent every message)`);
-        lines.push(`wc -c /workspace/CLAUDE.md 2>/dev/null || echo "no CLAUDE.md"`);
+        lines.push(
+          `# Size of main CLAUDE.md (system prompt sent every message)`,
+        );
+        lines.push(
+          `wc -c /workspace/CLAUDE.md 2>/dev/null || echo "no CLAUDE.md"`,
+        );
         lines.push(``);
         lines.push(`# All markdown files sorted by size`);
         lines.push(
