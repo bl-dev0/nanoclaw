@@ -376,6 +376,7 @@ async function runQuery(
   let lastModel: string | undefined;
   let messageCount = 0;
   let resultCount = 0;
+  const agentModel = process.env.AGENT_MODEL || undefined;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
   const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
@@ -407,6 +408,7 @@ async function runQuery(
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
+      ...(agentModel ? { model: agentModel } : {}),
       systemPrompt: globalClaudeMd
         ? { type: 'preset' as const, preset: 'claude_code' as const, append: globalClaudeMd }
         : undefined,
@@ -569,6 +571,8 @@ async function main(): Promise<void> {
     prompt += '\n' + pending.join('\n');
   }
 
+  const agentModel = process.env.AGENT_MODEL || undefined;
+
   // --- Slash command handling ---
   // Only known session slash commands are handled here. This prevents
   // accidental interception of user prompts that happen to start with '/'.
@@ -589,6 +593,7 @@ async function main(): Promise<void> {
         options: {
           cwd: '/workspace/group',
           resume: sessionId,
+          ...(agentModel ? { model: agentModel } : {}),
           systemPrompt: undefined,
           allowedTools: [],
           env: sdkEnv,

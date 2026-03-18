@@ -406,6 +406,11 @@ export async function runContainerAgent(
 
   const containerArgs = buildContainerArgs(mounts, containerName);
 
+  // Per-group model override
+  if (group.containerConfig?.model) {
+    containerArgs.push('-e', `AGENT_MODEL=${group.containerConfig.model}`);
+  }
+
   logger.debug(
     {
       group: group.name,
@@ -485,7 +490,7 @@ export async function runContainerAgent(
 
           try {
             const parsed: ContainerOutput = JSON.parse(jsonStr);
-            if (parsed.newSessionId) {
+            if (parsed.newSessionId && parsed.status !== 'error') {
               newSessionId = parsed.newSessionId;
             }
             if (parsed.usage && parsed.result) {

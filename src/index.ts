@@ -130,6 +130,10 @@ let messageLoopRunning = false;
 const flushTriggered: Record<string, boolean> = {};
 const TOKEN_FLUSH_THRESHOLD = 0.75;
 const ESTIMATED_CONTEXT_WINDOW = 200_000; // tokens
+const AUTO_COMPACT_THRESHOLD = parseInt(
+  process.env.AUTO_COMPACT_TOKENS ?? '200000',
+  10,
+);
 
 function shouldTriggerMemoryFlush(groupFolder: string): boolean {
   const sessionDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
@@ -320,6 +324,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
+  let lastUsage: import('./cost-tracker.js').UsageData | undefined;
   const output = await runAgent(group, prompt, chatJid, async (result) => {
     // Streaming output callback — called for each agent result
     if (result.result) {
@@ -336,6 +341,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       }
       // Only reset idle timer on actual results, not session-update markers (result: null)
       resetIdleTimer();
+      if (result.usage) lastUsage = result.usage;
 
       // Pre-compaction memory flush: inject a save prompt when the session is
       // approaching the context limit, at most once per session per group.
@@ -378,6 +384,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
       checkBudgetAlert((text) => mainChannel.sendMessage(mainJid, text)).catch(
         (err) => logger.warn({ err }, 'Budget alert send failed'),
       );
+    }
+  }
+
+  // Auto-compact: if cached context exceeds threshold, compact silently
+  if (!hadError) {
+    const cachedTokens =
+      (lastUsage?.cache_read_input_tokens ?? 0) +
+      (lastUsage?.cache_creation_input_tokens ?? 0);
+    if (cachedTokens > AUTO_COMPACT_THRESHOLD) {
+      logger.info(
+        { group: group.name, cachedTokens, threshold: AUTO_COMPACT_THRESHOLD },
+        'Auto-compact triggered',
+      );
+      await runAgent(group, '/compact', chatJid, async () => {});
     }
   }
 
@@ -441,7 +461,7 @@ async function runAgent(
   // Wrap onOutput to track session ID from streamed results
   const wrappedOnOutput = onOutput
     ? async (output: ContainerOutput) => {
-        if (output.newSessionId) {
+        if (output.newSessionId && output.status !== 'error') {
           sessions[group.folder] = output.newSessionId;
           setSession(group.folder, output.newSessionId);
         }
@@ -465,7 +485,7 @@ async function runAgent(
       wrappedOnOutput,
     );
 
-    if (output.newSessionId) {
+    if (output.newSessionId && output.status !== 'error') {
       sessions[group.folder] = output.newSessionId;
       setSession(group.folder, output.newSessionId);
     }
