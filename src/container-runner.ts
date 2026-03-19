@@ -8,8 +8,11 @@ import os from 'os';
 import path from 'path';
 
 import {
+  CONTAINER_CPU_LIMIT,
   CONTAINER_IMAGE,
   CONTAINER_MAX_OUTPUT_SIZE,
+  CONTAINER_MEMORY_LIMIT,
+  CONTAINER_PIDS_LIMIT,
   CONTAINER_TIMEOUT,
   CREDENTIAL_PROXY_PORT,
   DATA_DIR,
@@ -411,6 +414,19 @@ export async function runContainerAgent(
   if (group.containerConfig?.model) {
     containerArgs.push('-e', `AGENT_MODEL=${group.containerConfig.model}`);
   }
+
+  // Resource limits — prevent runaway agents from exhausting VPS resources.
+  // Per-group overrides take precedence over global config.
+  const memoryLimit = group.containerConfig?.memoryLimit ?? CONTAINER_MEMORY_LIMIT;
+  const cpuLimit = group.containerConfig?.cpuLimit ?? CONTAINER_CPU_LIMIT;
+  const imageIndex = containerArgs.lastIndexOf(CONTAINER_IMAGE);
+  containerArgs.splice(
+    imageIndex,
+    0,
+    `--memory=${memoryLimit}`,
+    `--cpus=${cpuLimit}`,
+    `--pids-limit=${CONTAINER_PIDS_LIMIT}`,
+  );
 
   logger.debug(
     {

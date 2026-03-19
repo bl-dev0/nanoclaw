@@ -85,3 +85,15 @@ export const TELEGRAM_BOT_POOL = (process.env.TELEGRAM_BOT_POOL || '')
   .split(',')
   .map((t) => t.trim())
   .filter(Boolean);
+
+// Container resource limits — prevent runaway agents from exhausting VPS resources.
+// On an 8GB VPS with MAX_CONCURRENT_CONTAINERS=5, keep CONTAINER_MEMORY_LIMIT at 1500m or lower.
+export const CONTAINER_MEMORY_LIMIT =
+  process.env.CONTAINER_MEMORY_LIMIT || '1500m';
+export const CONTAINER_CPU_LIMIT = parseFloat(
+  process.env.CONTAINER_CPU_LIMIT || '2',
+);
+export const CONTAINER_PIDS_LIMIT = parseInt(
+  process.env.CONTAINER_PIDS_LIMIT || '512',
+  10,
+);

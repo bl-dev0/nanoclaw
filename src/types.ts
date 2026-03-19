@@ -31,6 +31,8 @@ export interface ContainerConfig {
   additionalMounts?: AdditionalMount[];
   timeout?: number; // Default: 300000 (5 minutes)
   model?: string; // Override default model (e.g. 'claude-haiku-4-5-20251001')
+  memoryLimit?: string; // Docker memory string, e.g. '2g', '512m'. Overrides CONTAINER_MEMORY_LIMIT.
+  cpuLimit?: number; // Fractional cores, e.g. 3.0. Overrides CONTAINER_CPU_LIMIT.
 }
 
 export interface RegisteredGroup {
