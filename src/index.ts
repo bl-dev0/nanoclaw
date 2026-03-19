@@ -70,10 +70,7 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { parseImageReferences } from './image.js';
 import { logger } from './logger.js';
-import {
-  getMonthlyCostReport,
-  generateApiReport,
-} from './cost-tracker.js';
+import { getMonthlyCostReport, generateApiReport } from './cost-tracker.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
