@@ -187,3 +187,113 @@ export function getProjectedMonthlyCost(db: Database.Database): number {
     .get() as { avg: number };
   return avg * 30;
 }
+
+/**
+ * Generate a deterministic text report of API usage, grouped by day.
+ * For each day: total cost, then per-group breakdown with model detail.
+ * groupNames maps jid → human-readable name.
+ * days: number of past days to include (default 7).
+ */
+export function generateApiReport(
+  db: Database.Database,
+  groupNames: Record<string, string>,
+  days = 7,
+): string {
+  type DayRow = { date: string; cost: number; msgs: number };
+  type DetailRow = {
+    date: string;
+    group_jid: string;
+    model: string;
+    msgs: number;
+    input_k: number;
+    output_k: number;
+    cache_read_k: number;
+    cache_write_k: number;
+    cost: number;
+  };
+
+  const sinceExpr = `date('now', '-${days - 1} days')`;
+
+  const byDay = db
+    .prepare(
+      `SELECT strftime('%Y-%m-%d', timestamp) as date,
+              SUM(estimated_cost_usd) as cost,
+              COUNT(*) as msgs
+       FROM api_usage
+       WHERE timestamp >= ${sinceExpr}
+       GROUP BY date ORDER BY date DESC`,
+    )
+    .all() as DayRow[];
+
+  const detail = db
+    .prepare(
+      `SELECT strftime('%Y-%m-%d', timestamp) as date,
+              group_jid,
+              model,
+              COUNT(*) as msgs,
+              ROUND(SUM(input_tokens)       / 1000.0, 1) as input_k,
+              ROUND(SUM(output_tokens)      / 1000.0, 1) as output_k,
+              ROUND(SUM(cache_read_tokens)  / 1000.0, 1) as cache_read_k,
+              ROUND(SUM(cache_write_tokens) / 1000.0, 1) as cache_write_k,
+              SUM(estimated_cost_usd) as cost
+       FROM api_usage
+       WHERE timestamp >= ${sinceExpr}
+       GROUP BY date, group_jid, model
+       ORDER BY date DESC, cost DESC`,
+    )
+    .all() as DetailRow[];
+
+  // Index detail rows by date for fast lookup
+  const detailByDate = new Map<string, DetailRow[]>();
+  for (const row of detail) {
+    const arr = detailByDate.get(row.date) ?? [];
+    arr.push(row);
+    detailByDate.set(row.date, arr);
+  }
+
+  const fmt2 = (n: number) => n.toFixed(2);
+  const fmt4 = (n: number) => n.toFixed(4);
+  const shortModel = (m: string) => {
+    if (m.includes('haiku')) return 'haiku';
+    if (m.includes('sonnet')) return 'sonnet';
+    if (m.includes('opus')) return 'opus';
+    return m.split('-')[1] ?? m;
+  };
+  const groupLabel = (jid: string) => groupNames[jid] ?? jid;
+
+  if (byDay.length === 0) {
+    return `API Report — last ${days} days\n\nNo data.`;
+  }
+
+  const lines: string[] = [`API Report — last ${days} days`, ''];
+
+  // Monthly totals header
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const monthRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(estimated_cost_usd), 0) as cost, COUNT(*) as msgs
+       FROM api_usage WHERE timestamp >= ?`,
+    )
+    .get(monthStart.toISOString()) as { cost: number; msgs: number };
+  lines.push(
+    `Month-to-date: $${fmt2(monthRow.cost)}  (${monthRow.msgs} calls)`,
+  );
+  lines.push('');
+
+  for (const day of byDay) {
+    lines.push(`── ${day.date}  $${fmt4(day.cost)}  (${day.msgs} calls)`);
+    const rows = detailByDate.get(day.date) ?? [];
+    for (const r of rows) {
+      lines.push(
+        `   ${groupLabel(r.group_jid)} [${shortModel(r.model)}]` +
+          `  $${fmt4(r.cost)}  ${r.msgs}c` +
+          `  in:${r.input_k}K out:${r.output_k}K` +
+          `  cr:${r.cache_read_k}K cw:${r.cache_write_k}K`,
+      );
+    }
+  }
+
+  return lines.join('\n');
+}

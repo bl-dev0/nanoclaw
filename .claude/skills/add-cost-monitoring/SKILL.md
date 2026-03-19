@@ -807,18 +807,213 @@ The agent should invoke `get_cost_report` and respond with the breakdown.
 
 ---
 
+### Step 13 — Add `/api_report` command (deterministic, no LLM)
+
+This step adds a `/api_report` slash command that generates the report directly
+from the DB without invoking the agent — output is always the same for the same
+data (deterministic).
+
+**13a — Add `generateApiReport` to `src/cost-tracker.ts`**
+
+Append this function at the end of the file:
+
+```typescript
+/**
+ * Generate a deterministic text report of API usage, grouped by day.
+ * For each day: total cost, then per-group breakdown with model detail.
+ * groupNames maps jid → human-readable name.
+ * days: number of past days to include (default 7).
+ */
+export function generateApiReport(
+  db: Database.Database,
+  groupNames: Record<string, string>,
+  days = 7,
+): string {
+  type DayRow = { date: string; cost: number; msgs: number };
+  type DetailRow = {
+    date: string;
+    group_jid: string;
+    model: string;
+    msgs: number;
+    input_k: number;
+    output_k: number;
+    cache_read_k: number;
+    cache_write_k: number;
+    cost: number;
+  };
+
+  const sinceExpr = `date('now', '-${days - 1} days')`;
+
+  const byDay = db
+    .prepare(
+      `SELECT strftime('%Y-%m-%d', timestamp) as date,
+              SUM(estimated_cost_usd) as cost,
+              COUNT(*) as msgs
+       FROM api_usage
+       WHERE timestamp >= ${sinceExpr}
+       GROUP BY date ORDER BY date DESC`,
+    )
+    .all() as DayRow[];
+
+  const detail = db
+    .prepare(
+      `SELECT strftime('%Y-%m-%d', timestamp) as date,
+              group_jid,
+              model,
+              COUNT(*) as msgs,
+              ROUND(SUM(input_tokens)       / 1000.0, 1) as input_k,
+              ROUND(SUM(output_tokens)      / 1000.0, 1) as output_k,
+              ROUND(SUM(cache_read_tokens)  / 1000.0, 1) as cache_read_k,
+              ROUND(SUM(cache_write_tokens) / 1000.0, 1) as cache_write_k,
+              SUM(estimated_cost_usd) as cost
+       FROM api_usage
+       WHERE timestamp >= ${sinceExpr}
+       GROUP BY date, group_jid, model
+       ORDER BY date DESC, cost DESC`,
+    )
+    .all() as DetailRow[];
+
+  const detailByDate = new Map<string, DetailRow[]>();
+  for (const row of detail) {
+    const arr = detailByDate.get(row.date) ?? [];
+    arr.push(row);
+    detailByDate.set(row.date, arr);
+  }
+
+  const fmt2 = (n: number) => n.toFixed(2);
+  const fmt4 = (n: number) => n.toFixed(4);
+  const shortModel = (m: string) => {
+    if (m.includes('haiku')) return 'haiku';
+    if (m.includes('sonnet')) return 'sonnet';
+    if (m.includes('opus')) return 'opus';
+    return m.split('-')[1] ?? m;
+  };
+  const groupLabel = (jid: string) => groupNames[jid] ?? jid;
+
+  if (byDay.length === 0) {
+    return `API Report — last ${days} days\n\nNo data.`;
+  }
+
+  const lines: string[] = [`API Report — last ${days} days`, ''];
+
+  const monthStart = new Date();
+  monthStart.setUTCDate(1);
+  monthStart.setUTCHours(0, 0, 0, 0);
+  const monthRow = db
+    .prepare(
+      `SELECT COALESCE(SUM(estimated_cost_usd), 0) as cost, COUNT(*) as msgs
+       FROM api_usage WHERE timestamp >= ?`,
+    )
+    .get(monthStart.toISOString()) as { cost: number; msgs: number };
+  lines.push(`Month-to-date: $${fmt2(monthRow.cost)}  (${monthRow.msgs} calls)`);
+  lines.push('');
+
+  for (const day of byDay) {
+    lines.push(`── ${day.date}  $${fmt4(day.cost)}  (${day.msgs} calls)`);
+    const rows = detailByDate.get(day.date) ?? [];
+    for (const r of rows) {
+      lines.push(
+        `   ${groupLabel(r.group_jid)} [${shortModel(r.model)}]` +
+          `  $${fmt4(r.cost)}  ${r.msgs}c` +
+          `  in:${r.input_k}K out:${r.output_k}K` +
+          `  cr:${r.cache_read_k}K cw:${r.cache_write_k}K`,
+      );
+    }
+  }
+
+  return lines.join('\n');
+}
+```
+
+**13b — Add `/api_report` recognition in `src/session-commands.ts`**
+
+In `extractSessionCommand`, after the `/model` check, add:
+```typescript
+if (/^\/api_report(\s+\d+)?$/.test(text)) return text;
+```
+
+Add to `SessionCommandDeps`:
+```typescript
+/** Generate a deterministic API usage report (optional — only present when cost-monitoring is installed). */
+generateReport?: (days: number) => Promise<string>;
+```
+
+In `handleSessionCommand`, after the `/model` short-circuit block, add:
+```typescript
+// Short-circuit for /api_report — deterministic report, no agent invocation
+if (command.startsWith('/api_report')) {
+  const daysArg = command.split(/\s+/)[1];
+  const days = daysArg ? parseInt(daysArg, 10) : 7;
+  if (deps.generateReport) {
+    const report = await deps.generateReport(days);
+    await deps.sendMessage(report);
+  } else {
+    await deps.sendMessage(
+      'Cost monitoring not installed. Apply the add-cost-monitoring skill first.',
+    );
+  }
+  deps.advanceCursor(cmdMsg.timestamp);
+  return { handled: true, success: true };
+}
+```
+
+**13c — Wire `generateReport` into `handleSessionCommand` deps in `src/index.ts`**
+
+Add `generateApiReport` to the cost-tracker import:
+```typescript
+import {
+  getMonthlyCostReport,
+  generateApiReport,
+} from './cost-tracker.js';
+```
+
+Inside the `deps` object passed to `handleSessionCommand`, add:
+```typescript
+generateReport: async (days) => {
+  const { default: Database } = await import('better-sqlite3');
+  const { STORE_DIR } = await import('./config.js');
+  const db = new Database(path.join(STORE_DIR, 'messages.db'), {
+    readonly: true,
+  });
+  try {
+    const names: Record<string, string> = {};
+    for (const [jid, g] of Object.entries(registeredGroups)) {
+      names[jid] = g.name;
+    }
+    return generateApiReport(db, names, days);
+  } finally {
+    db.close();
+  }
+},
+```
+
+**13d — Build and restart**
+
+```bash
+npm run build
+systemctl --user restart nanoclaw
+```
+
+**Usage:**
+- `/api_report` — last 7 days
+- `/api_report 14` — last 14 days
+- `/api_report 30` — last 30 days
+
+---
+
 ## Summary of modified files
 
 | File | Change type |
 |---|---|
 | `store/messages.db` | New `api_usage` table + indexes |
-| `src/cost-tracker.ts` | **New** — cost calculation, queries, host-side logging |
+| `src/cost-tracker.ts` | **New** — cost calculation, queries, host-side logging, `generateApiReport` |
 | `src/cost-mcp-server.ts` | **New** — self-contained MCP tool (SQL inlined, no host imports) |
+| `src/session-commands.ts` | Add `/api_report` recognition + `generateReport` dep + handler |
 | `src/container-runner.ts` | Add import + logging hook + bind-mounts for bundle and store dir |
 | `container/agent-runner/package.json` | Add `better-sqlite3` dependency |
 | `container/agent-runner/src/index.ts` | Add MCP server registration + allowedTool |
 | `package.json` | Add esbuild bundle step to `build` script |
-| `src/index.ts` | Add import + `checkBudgetAlert` function |
+| `src/index.ts` | Add import + `checkBudgetAlert` + `generateReport` dep |
 
 ---
 

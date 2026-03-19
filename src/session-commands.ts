@@ -36,6 +36,7 @@ export function extractSessionCommand(
   text = text.replace(triggerPattern, '').trim();
   if (text === '/compact') return '/compact';
   if (/^\/model(\s+\S+)?$/.test(text)) return text;
+  if (/^\/api_report(\s+\d+)?$/.test(text)) return text;
   return null;
 }
 
@@ -79,6 +80,8 @@ export interface SessionCommandDeps {
   clearSessionCache: () => void;
   /** Return the current model override, if any. */
   currentModel: () => string | undefined;
+  /** Generate a deterministic API usage report (optional — only present when cost-monitoring is installed). */
+  generateReport?: (days: number) => Promise<string>;
 }
 
 async function handleModelCommand(
@@ -202,6 +205,22 @@ export async function handleSessionCommand(opts: {
   if (command.startsWith('/model')) {
     const action = parseModelCommand(command);
     if (action) await handleModelCommand(action, deps);
+    deps.advanceCursor(cmdMsg.timestamp);
+    return { handled: true, success: true };
+  }
+
+  // Short-circuit for /api_report — deterministic report, no agent invocation
+  if (command.startsWith('/api_report')) {
+    const daysArg = command.split(/\s+/)[1];
+    const days = daysArg ? parseInt(daysArg, 10) : 7;
+    if (deps.generateReport) {
+      const report = await deps.generateReport(days);
+      await deps.sendMessage(report);
+    } else {
+      await deps.sendMessage(
+        'Cost monitoring not installed. Apply the add-cost-monitoring skill first.',
+      );
+    }
     deps.advanceCursor(cmdMsg.timestamp);
     return { handled: true, success: true };
   }

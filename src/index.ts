@@ -70,7 +70,10 @@ import { startSchedulerLoop } from './task-scheduler.js';
 import { Channel, NewMessage, RegisteredGroup } from './types.js';
 import { parseImageReferences } from './image.js';
 import { logger } from './logger.js';
-import { getMonthlyCostReport } from './cost-tracker.js';
+import {
+  getMonthlyCostReport,
+  generateApiReport,
+} from './cost-tracker.js';
 
 // Re-export for backwards compatibility during refactor
 export { escapeXml, formatMessages } from './router.js';
@@ -330,6 +333,22 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
         }
       },
       currentModel: () => group.containerConfig?.model,
+      generateReport: async (days) => {
+        const { default: Database } = await import('better-sqlite3');
+        const { STORE_DIR } = await import('./config.js');
+        const db = new Database(path.join(STORE_DIR, 'messages.db'), {
+          readonly: true,
+        });
+        try {
+          const names: Record<string, string> = {};
+          for (const [jid, g] of Object.entries(registeredGroups)) {
+            names[jid] = g.name;
+          }
+          return generateApiReport(db, names, days);
+        } finally {
+          db.close();
+        }
+      },
     },
   });
   if (cmdResult.handled) return cmdResult.success;
