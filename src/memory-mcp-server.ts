@@ -257,217 +257,220 @@ interface SearchRow {
   rank: number;
 }
 
-server.setRequestHandler(CallToolRequestSchema, async (request: CallToolRequest) => {
-  const { name, arguments: args } = request.params;
+server.setRequestHandler(
+  CallToolRequestSchema,
+  async (request: CallToolRequest) => {
+    const { name, arguments: args } = request.params;
 
-  // ── memory_search ──────────────────────────────────────────────────────────
-  if (name === 'memory_search') {
-    const {
-      query,
-      max_results = 5,
-      date_from,
-      date_to,
-    } = args as {
-      query: string;
-      max_results?: number;
-      date_from?: string;
-      date_to?: string;
-    };
-    const limit = Math.min(max_results ?? 5, 20);
+    // ── memory_search ──────────────────────────────────────────────────────────
+    if (name === 'memory_search') {
+      const {
+        query,
+        max_results = 5,
+        date_from,
+        date_to,
+      } = args as {
+        query: string;
+        max_results?: number;
+        date_from?: string;
+        date_to?: string;
+      };
+      const limit = Math.min(max_results ?? 5, 20);
 
-    try {
-      // Fetch extra rows when date filtering so we can trim after
-      const fetchLimit =
-        date_from || date_to ? Math.min(limit * 5, 100) : limit;
-      const rows = db
-        .prepare(
-          `SELECT file, line_start, content, rank
+      try {
+        // Fetch extra rows when date filtering so we can trim after
+        const fetchLimit =
+          date_from || date_to ? Math.min(limit * 5, 100) : limit;
+        const rows = db
+          .prepare(
+            `SELECT file, line_start, content, rank
            FROM memory_fts
            WHERE memory_fts MATCH ?
            ORDER BY rank
            LIMIT ?`,
-        )
-        .all(query, fetchLimit) as SearchRow[];
+          )
+          .all(query, fetchLimit) as SearchRow[];
 
-      const filtered =
-        date_from || date_to
-          ? rows
-              .filter((row) => {
-                const m = row.file.match(/^memory\/(\d{4}-\d{2}-\d{2})\.md$/);
-                if (!m) return true; // Keep MEMORY.md and other files
-                const d = m[1];
-                if (date_from && d < date_from) return false;
-                if (date_to && d > date_to) return false;
-                return true;
-              })
-              .slice(0, limit)
-          : rows;
+        const filtered =
+          date_from || date_to
+            ? rows
+                .filter((row) => {
+                  const m = row.file.match(/^memory\/(\d{4}-\d{2}-\d{2})\.md$/);
+                  if (!m) return true; // Keep MEMORY.md and other files
+                  const d = m[1];
+                  if (date_from && d < date_from) return false;
+                  if (date_to && d > date_to) return false;
+                  return true;
+                })
+                .slice(0, limit)
+            : rows;
 
-      if (filtered.length === 0) {
-        return { content: [{ type: 'text', text: 'No results found.' }] };
-      }
-
-      const text = filtered
-        .map(
-          (r) =>
-            `**${r.file}** (line ${r.line_start}):\n${r.content.slice(0, 600)}`,
-        )
-        .join('\n\n---\n\n');
-      return { content: [{ type: 'text', text }] };
-    } catch (err) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Search error: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
-      };
-    }
-  }
-
-  // ── memory_write ───────────────────────────────────────────────────────────
-  if (name === 'memory_write') {
-    const { target, content, section, mode } = args as {
-      target: 'daily' | 'long_term';
-      content: string;
-      section?: string;
-      mode: 'append' | 'replace_section';
-    };
-
-    let filePath: string;
-
-    if (target === 'daily') {
-      filePath = path.join(DAILY_DIR, `${getToday()}.md`);
-      const existing = fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, 'utf-8')
-        : '';
-      const sep = existing
-        ? existing.endsWith('\n\n')
-          ? ''
-          : existing.endsWith('\n')
-            ? '\n'
-            : '\n\n'
-        : '';
-      fs.writeFileSync(filePath, existing + sep + content);
-    } else {
-      // long_term -> MEMORY.md
-      filePath = LONG_TERM_FILE;
-      const existing = fs.existsSync(filePath)
-        ? fs.readFileSync(filePath, 'utf-8')
-        : '# Memoria de Largo Plazo\n';
-
-      if (mode === 'replace_section' && section) {
-        const lines = existing.split('\n');
-        const sectionHeader = `## ${section}`;
-        const sectionIdx = lines.findIndex(
-          (line) => line.trim() === sectionHeader,
-        );
-
-        if (sectionIdx === -1) {
-          // Append new section
-          fs.writeFileSync(
-            filePath,
-            existing.trimEnd() + `\n\n${sectionHeader}\n\n${content}\n`,
-          );
-        } else {
-          const nextIdx = lines.findIndex(
-            (line, idx) => idx > sectionIdx && line.startsWith('## '),
-          );
-          const endIdx = nextIdx === -1 ? lines.length : nextIdx;
-          const before = lines.slice(0, sectionIdx + 1).join('\n');
-          const after = lines.slice(endIdx).join('\n');
-          const newContent =
-            before + '\n\n' + content + '\n' + (after ? '\n' + after : '');
-          fs.writeFileSync(filePath, newContent.trimEnd() + '\n');
+        if (filtered.length === 0) {
+          return { content: [{ type: 'text', text: 'No results found.' }] };
         }
-      } else {
-        const sep = existing.endsWith('\n') ? '' : '\n';
-        fs.writeFileSync(filePath, existing + sep + content);
+
+        const text = filtered
+          .map(
+            (r) =>
+              `**${r.file}** (line ${r.line_start}):\n${r.content.slice(0, 600)}`,
+          )
+          .join('\n\n---\n\n');
+        return { content: [{ type: 'text', text }] };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Search error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+        };
       }
     }
 
-    forceReindex(filePath);
-    const linesWritten = content.split('\n').length;
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            success: true,
-            file: getRelativePath(filePath),
-            lines_written: linesWritten,
-          }),
-        },
-      ],
-    };
-  }
-
-  // ── memory_get ─────────────────────────────────────────────────────────────
-  if (name === 'memory_get') {
-    const { file, line_start, line_end } = args as {
-      file: string;
-      line_start?: number;
-      line_end?: number;
-    };
-
-    let filePath: string;
-    try {
-      filePath = resolveFile(file);
-    } catch (err) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${err instanceof Error ? err.message : String(err)}`,
-          },
-        ],
+    // ── memory_write ───────────────────────────────────────────────────────────
+    if (name === 'memory_write') {
+      const { target, content, section, mode } = args as {
+        target: 'daily' | 'long_term';
+        content: string;
+        section?: string;
+        mode: 'append' | 'replace_section';
       };
-    }
 
-    if (!fs.existsSync(filePath)) {
+      let filePath: string;
+
+      if (target === 'daily') {
+        filePath = path.join(DAILY_DIR, `${getToday()}.md`);
+        const existing = fs.existsSync(filePath)
+          ? fs.readFileSync(filePath, 'utf-8')
+          : '';
+        const sep = existing
+          ? existing.endsWith('\n\n')
+            ? ''
+            : existing.endsWith('\n')
+              ? '\n'
+              : '\n\n'
+          : '';
+        fs.writeFileSync(filePath, existing + sep + content);
+      } else {
+        // long_term -> MEMORY.md
+        filePath = LONG_TERM_FILE;
+        const existing = fs.existsSync(filePath)
+          ? fs.readFileSync(filePath, 'utf-8')
+          : '# Memoria de Largo Plazo\n';
+
+        if (mode === 'replace_section' && section) {
+          const lines = existing.split('\n');
+          const sectionHeader = `## ${section}`;
+          const sectionIdx = lines.findIndex(
+            (line) => line.trim() === sectionHeader,
+          );
+
+          if (sectionIdx === -1) {
+            // Append new section
+            fs.writeFileSync(
+              filePath,
+              existing.trimEnd() + `\n\n${sectionHeader}\n\n${content}\n`,
+            );
+          } else {
+            const nextIdx = lines.findIndex(
+              (line, idx) => idx > sectionIdx && line.startsWith('## '),
+            );
+            const endIdx = nextIdx === -1 ? lines.length : nextIdx;
+            const before = lines.slice(0, sectionIdx + 1).join('\n');
+            const after = lines.slice(endIdx).join('\n');
+            const newContent =
+              before + '\n\n' + content + '\n' + (after ? '\n' + after : '');
+            fs.writeFileSync(filePath, newContent.trimEnd() + '\n');
+          }
+        } else {
+          const sep = existing.endsWith('\n') ? '' : '\n';
+          fs.writeFileSync(filePath, existing + sep + content);
+        }
+      }
+
+      forceReindex(filePath);
+      const linesWritten = content.split('\n').length;
       return {
         content: [
           {
             type: 'text',
             text: JSON.stringify({
-              text: '',
-              path: getRelativePath(filePath),
-              lines: 0,
+              success: true,
+              file: getRelativePath(filePath),
+              lines_written: linesWritten,
             }),
           },
         ],
       };
     }
 
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const allLines = raw.split('\n');
+    // ── memory_get ─────────────────────────────────────────────────────────────
+    if (name === 'memory_get') {
+      const { file, line_start, line_end } = args as {
+        file: string;
+        line_start?: number;
+        line_end?: number;
+      };
 
-    let text: string;
-    if (line_start !== undefined || line_end !== undefined) {
-      const start = (line_start ?? 1) - 1;
-      const end = line_end ?? allLines.length;
-      text = allLines.slice(start, end).join('\n');
-    } else {
-      text = raw;
+      let filePath: string;
+      try {
+        filePath = resolveFile(file);
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: `Error: ${err instanceof Error ? err.message : String(err)}`,
+            },
+          ],
+        };
+      }
+
+      if (!fs.existsSync(filePath)) {
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                text: '',
+                path: getRelativePath(filePath),
+                lines: 0,
+              }),
+            },
+          ],
+        };
+      }
+
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const allLines = raw.split('\n');
+
+      let text: string;
+      if (line_start !== undefined || line_end !== undefined) {
+        const start = (line_start ?? 1) - 1;
+        const end = line_end ?? allLines.length;
+        text = allLines.slice(start, end).join('\n');
+      } else {
+        text = raw;
+      }
+
+      return {
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              text,
+              path: getRelativePath(filePath),
+              lines: allLines.length,
+            }),
+          },
+        ],
+      };
     }
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            text,
-            path: getRelativePath(filePath),
-            lines: allLines.length,
-          }),
-        },
-      ],
-    };
-  }
-
-  throw new Error(`Unknown tool: ${name}`);
-});
+    throw new Error(`Unknown tool: ${name}`);
+  },
+);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);

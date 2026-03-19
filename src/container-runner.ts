@@ -417,7 +417,8 @@ export async function runContainerAgent(
 
   // Resource limits — prevent runaway agents from exhausting VPS resources.
   // Per-group overrides take precedence over global config.
-  const memoryLimit = group.containerConfig?.memoryLimit ?? CONTAINER_MEMORY_LIMIT;
+  const memoryLimit =
+    group.containerConfig?.memoryLimit ?? CONTAINER_MEMORY_LIMIT;
   const cpuLimit = group.containerConfig?.cpuLimit ?? CONTAINER_CPU_LIMIT;
   const imageIndex = containerArgs.lastIndexOf(CONTAINER_IMAGE);
   containerArgs.splice(
