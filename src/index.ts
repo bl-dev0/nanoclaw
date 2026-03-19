@@ -142,6 +142,9 @@ const AUTO_COMPACT_THRESHOLD = parseInt(
   process.env.AUTO_COMPACT_TOKENS ?? '200000',
   10,
 );
+// Persists cached token count from the last run per group, so the NEXT
+// invocation can compact BEFORE running if the previous run was expensive.
+const lastCachedTokens: Record<string, number> = {};
 
 function shouldTriggerMemoryFlush(groupFolder: string): boolean {
   const sessionDir = path.join(DATA_DIR, 'sessions', groupFolder, '.claude');
@@ -374,6 +377,19 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }, IDLE_TIMEOUT);
   };
 
+  // Pre-flight compact: if the previous run for this group exceeded the
+  // threshold, compact before processing the new message so the expensive
+  // call doesn't happen with a bloated context.
+  const prevCached = lastCachedTokens[chatJid] ?? 0;
+  if (prevCached > AUTO_COMPACT_THRESHOLD) {
+    logger.info(
+      { group: group.name, prevCached, threshold: AUTO_COMPACT_THRESHOLD },
+      'Pre-flight auto-compact triggered',
+    );
+    await runAgent(group, '/compact', chatJid, undefined, async () => {});
+    lastCachedTokens[chatJid] = 0;
+  }
+
   await channel.setTyping?.(chatJid, true);
   let hadError = false;
   let outputSentToUser = false;
@@ -449,17 +465,20 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     }
   }
 
-  // Auto-compact: if cached context exceeds threshold, compact silently
+  // Persist cached token count for the pre-flight check on the next message.
+  // Also compact immediately if over threshold (catches single-message spikes).
   if (!hadError) {
     const cachedTokens =
       (lastUsage?.cache_read_input_tokens ?? 0) +
       (lastUsage?.cache_creation_input_tokens ?? 0);
+    lastCachedTokens[chatJid] = cachedTokens;
     if (cachedTokens > AUTO_COMPACT_THRESHOLD) {
       logger.info(
         { group: group.name, cachedTokens, threshold: AUTO_COMPACT_THRESHOLD },
-        'Auto-compact triggered',
+        'Post-run auto-compact triggered',
       );
       await runAgent(group, '/compact', chatJid, undefined, async () => {});
+      lastCachedTokens[chatJid] = 0;
     }
   }
 
